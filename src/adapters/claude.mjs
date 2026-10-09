@@ -9,6 +9,7 @@ const PERMISSION_MAP = { escalated: 'bypassPermissions', auto: 'auto', acceptEdi
 export default {
   name: 'claude',
   bin: 'claude',
+  modelFlag: '--model',
   requiredFlags: ['--print', '--output-format', '--model', '--permission-mode'],
   permissionDeniedPatterns: [
     /permission (denied|required)/i,

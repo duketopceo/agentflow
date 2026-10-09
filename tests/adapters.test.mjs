@@ -121,6 +121,21 @@ test('applyVia wraps wrappable harnesses, rejects others, direct is noop', () =>
   assert.deepEqual(w.slice(0, 4), ['ori', 'claude', '--reasoning-effort', 'high']);
 });
 
+test('applyVia: model routes through oris --model, native flag stripped', () => {
+  // codex native flag is -m; under ori the slug must go to ori's --model instead
+  const c = applyVia(codex, codex.buildArgv(spec({ model: 'x-ai/grok-4-fast' })), spec({ via: 'ori', model: 'x-ai/grok-4-fast' })).argv;
+  assert.deepEqual(c.slice(0, 5), ['ori', 'codex', '--model', 'x-ai/grok-4-fast', 'exec']);
+  assert.ok(!c.includes('-m'));
+  // claude/opencode native flag is --model — same position, still consumed by ori
+  const cl = applyVia(claude, claude.buildArgv(spec({ model: 'z-ai/glm-5.3-flash' })), spec({ via: 'ori', model: 'z-ai/glm-5.3-flash' })).argv;
+  assert.equal(cl.indexOf('--model'), 2);
+  assert.ok(cl.indexOf('--model') === cl.lastIndexOf('--model')); // one --model, ori's
+  // model+reasoningEffort both inject before the positional subcommand
+  const o = applyVia(opencode, opencode.buildArgv(spec({ model: 'm/x' })), spec({ via: 'ori', model: 'm/x', reasoningEffort: 'low' })).argv;
+  assert.deepEqual(o.slice(0, 6), ['ori', 'opencode', '--model', 'm/x', '--reasoning-effort', 'low']);
+  assert.ok(!o.includes('-m'));
+});
+
 test('ori reasoningEffort emits native flag', () => {
   assert.ok(ori.buildArgv(spec({ reasoningEffort: 'low' })).includes('low'));
 });

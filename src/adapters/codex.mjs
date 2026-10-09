@@ -12,6 +12,7 @@ import { join } from 'node:path';
 export default {
   name: 'codex',
   bin: 'codex',
+  modelFlag: '-m',
   requiredFlags: ['exec', '--model', '--sandbox', '--output-schema', '--output-last-message', '--worktree'],
   permissionDeniedPatterns: [
     /permission (denied|required)/i,

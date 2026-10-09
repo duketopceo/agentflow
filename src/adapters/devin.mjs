@@ -11,6 +11,7 @@ const PERMISSION_MAP = { escalated: 'dangerous', smart: 'smart', auto: 'auto', '
 export default {
   name: 'devin',
   bin: 'devin',
+  modelFlag: '--model',
   requiredFlags: ['--print', '--permission-mode', '--model', '--respect-workspace-trust'],
   permissionDeniedPatterns: [
     /permission (denied|required)/i,

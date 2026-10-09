@@ -279,3 +279,65 @@ log('R:' + a.text + '|' + b.text);`);
     f.cleanup();
   }
 });
+
+test('strict: nondeterministic script rejected before any agent runs', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const t = Date.now();
+const r = Math.random();
+await agent('x', {label:'a'});
+log('never');`);
+    const res = await f.run({ strict: true });
+    assert.equal(res.code, 1);
+    assert.equal(calls.length, 0); // rejected before spawn
+    assert.ok(f.lines.some((l) => l.includes('line 1') && l.includes('Date.now')));
+    assert.ok(f.lines.some((l) => l.includes('line 2') && l.includes('Math.random')));
+
+    // Same script passes without --strict.
+    calls.length = 0;
+    const res2 = await f.run();
+    assert.equal(res2.code, 0);
+    assert.equal(calls.length, 1);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('strict: new Date() and crypto.randomUUID flagged; deterministic script passes', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const d = new Date('2020-01-01');
+await agent('x', {label:'a'});`);
+    const res = await f.run({ strict: true });
+    assert.equal(res.code, 1);
+    assert.ok(f.lines.some((l) => l.includes('new Date')));
+
+    f.writeScript(`const stamped = 'new Date is fine as a string';
+const fixed = await agent('x', {label:'b'});
+log('done');`);
+    const before = f.lines.length; // f.lines accumulates across runs
+    const res2 = await f.run({ strict: true });
+    assert.equal(res2.code, 0);
+    assert.ok(!f.lines.slice(before).some((l) => l.includes('nondeterministic')));
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('maxAgents: cap aborts the run with a clear error', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`await parallel([1,2,3,4,5].map(n => () => agent('p'+n, {label:'a'+n})));
+log('never');`);
+    const res = await f.run({ maxAgents: 3 });
+    assert.equal(res.code, 1);
+    assert.ok(f.lines.some((l) => l.includes('cap exceeded')));
+    assert.ok(calls.length <= 3);
+    // Default 1000 unaffected by small runs
+    const res2 = await f.run();
+    assert.equal(res2.code, 0);
+    assert.equal(calls.length, 5);
+  } finally {
+    f.cleanup();
+  }
+});

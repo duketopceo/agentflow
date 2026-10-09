@@ -15,6 +15,7 @@ function eventText(ev) {
 export default {
   name: 'opencode',
   bin: 'opencode',
+  modelFlag: '-m',
   helpArgs: ['run', '--help'],
   requiredFlags: ['--format', '--model', '--agent', '--dir', '--auto'],
   permissionDeniedPatterns: [

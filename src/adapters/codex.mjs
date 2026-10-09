@@ -1,4 +1,4 @@
-import { extractJson, probeBinary, spawnProcess, classifyFailure } from './base.mjs';
+import { extractJson, probeBinary, spawnProcess, classifyFailure, applyVia } from './base.mjs';
 import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,8 +42,11 @@ export default {
         ctx.schemaFile = join(tmp, 'schema.json');
         writeFileSync(ctx.schemaFile, JSON.stringify(spec.schema));
       }
-      const argv = this.buildArgv(spec, ctx);
-      const r = await spawnProcess(argv, { cwd: spec.cwd, timeout: spec.timeout, signal: spec.signal });
+      const wrapped = applyVia(this, this.buildArgv(spec, ctx), spec);
+      if (wrapped.error) {
+        return { ok: false, error: { message: wrapped.error, stderrTail: '', code: null, timedOut: false, permissionDenied: false } };
+      }
+      const r = await spawnProcess(wrapped.argv, { cwd: spec.cwd, timeout: spec.timeout, signal: spec.signal });
       if (r.code === 0 && !r.timedOut) {
         const text = readText(ctx.lastMsgFile) ?? (r.stdout ?? '').trim();
         if (!text) return { ok: false, error: { message: 'empty result', stderrTail: r.stderr, code: 0, timedOut: false, permissionDenied: false } };

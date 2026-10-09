@@ -1,0 +1,116 @@
+---
+name: agentflow
+description: Fan out work to many agents via a workflow script — parallel subagent orchestration with journaled results and resume. Use when a task needs >4 independent agent calls, staged phases with aggregation, or results too large to keep in your own context.
+---
+
+# Agentflow — script-driven multi-agent orchestration
+
+You orchestrate turn-by-turn by default: every subagent result lands in your
+context window. Agentflow moves the loop, branching, and intermediate results
+into a JavaScript file that a runner executes — you keep only the final answer.
+
+## When to use
+
+- Fan-out beyond ~4 independent agent calls (file-per-file reviews, repo-wide
+  audits, per-endpoint checks, N-variant drafting).
+- Staged pipelines where later phases consume earlier results.
+- Runs you may need to interrupt and resume.
+- Results are bulky: the script holds them; you read the synthesis.
+
+## When NOT to use
+
+- 1-4 subagent calls — just use your harness's native subagent tool; a CLI
+  session per call has real startup cost, so keep fan-out granularity
+  meaningful (a whole file audit, not a function rename).
+- Anything needing shared state, locks, or transactions between agents —
+  workflow agents share nothing but the filesystem.
+- Claude Code's **native** Workflow tool (ultracode/`/deep-research`) — inside
+  Claude sessions, prefer it; it is faster and cheaper than spawning `claude -p`.
+
+## How it works
+
+```bash
+agentflow run workflow.mjs --harness devin --concurrency 8
+agentflow run workflow.mjs --resume <run-id>   # after interrupt
+agentflow doctor                             # check harness availability
+```
+
+Each `agent()` call spawns one **non-interactive CLI session** of the selected
+harness as a subprocess, in a fresh context, and resolves to `{text, json}` or
+`null` on failure. Calls queue under a bounded concurrency pool (default 8).
+Every settled call is journaled to `.agentflow/runs/<run-id>.jsonl`; `--resume`
+replays settled results and re-runs only what never finished.
+
+## Workflow script contract
+
+`.mjs` file, top-level `await` allowed, globals injected:
+
+| Global | Signature | Notes |
+|---|---|---|
+| `agent` | `(prompt, opts?) => Promise<{text, json} \| null>` | opts: `label`, `model`, `schema`, `worktree`, `cwd`, `timeout` (ms), `permission` |
+| `parallel` | `(thunks) => Promise<results>` | `parallel(files.map(f => () => agent(...)))` — order preserved, `null` per failure |
+| `pipeline` | `(items, ...stages) => Promise<results>` | each item flows through stages; `null` short-circuits that item |
+| `phase` | `(name) => void` | labels stderr progress |
+| `log` | `(msg) => void` | stderr; keep secrets out |
+| `args` | array | args after `--` on the CLI |
+| `meta` | object | from `export const meta = {...}` |
+
+Constraints:
+
+- `export const meta = { name, description }` is the only export; it must be a
+  **plain object literal**.
+- No static `import`/`export` — scripts are self-contained. Dynamic
+  `await import('node:fs')` works.
+- Determinism is your job: resume replays by call order, so keep `agent()`
+  call order stable across runs (don't drive call order off `Date.now()` or
+  unordered directory listings).
+
+## Per-harness adapter table
+
+| `--harness` | Spawns | `model` | `schema` | `worktree` | `permission: 'escalated'` |
+|---|---|---|---|---|---|
+| `devin` (default) | `devin -p` | `--model` (e.g. `claude-haiku-5-5-low`, `adaptive`) | prompt-level JSON instruction | planned | `dangerous` |
+| `claude` | `claude -p --output-format json` | `--model` | prompt-level | no | `bypassPermissions` |
+| `codex` | `codex exec` | `-m` | native `--output-schema` | `--worktree` | `--dangerously-bypass-approvals-and-sandbox` |
+| `opencode` | `opencode run --format json` | `-m provider/model` | prompt-level | no | `--auto` |
+| `echo` | none (test adapter) | — | canned | — | — |
+
+Default permission postures are least-privilege (`smart` devin / `auto` claude /
+`workspace-write` codex / none opencode). Headless agents that hit an approval
+prompt fail with `permissionDenied` journaled — prefer widening the prompt or
+`permission: 'escalated'` over re-running blindly.
+
+## Cost discipline
+
+Every `agent()` is a full session — each call costs real tokens plus seconds of
+startup. Prefer cheap models for extraction/labeling stages
+(`model: 'claude-haiku-5-5-low'` on devin, `provider/model` equivalents
+elsewhere) and reserve strong models for synthesis. A 50-agent fan-out on a
+premium model is expensive by design-free accident.
+
+## Safety
+
+**A workflow script is arbitrary code that spawns credentialed agents.** Never
+`agentflow run` a script you have not read — treat it like `curl | sh` with a
+sandboxed subprocess per line. The runner inherits your harness credentials and
+workspace permissions. Keep `.agentflow/` out of git (it is gitignored here;
+journals contain prompt and result text).
+
+## Authoring pattern
+
+```js
+export const meta = { name: 'audit', description: 'per-file review' };
+
+phase('fan-out');
+const reviews = await parallel(files.map(f => () =>
+  agent(`Review ${f}`, { label: `rev:${f}`, model: 'claude-haiku-5-5-low' })
+));
+
+phase('synthesize');
+const ok = reviews.filter(Boolean);      // nulls = failed agents, keep count
+const summary = await agent(`Synthesize:\n${ok.map(r => r.text).join('\n')}`,
+  { label: 'synthesis' });
+log(summary?.text ?? 'synthesis failed');
+```
+
+See `examples/parallel-audit.mjs` for a complete script.

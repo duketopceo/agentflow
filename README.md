@@ -30,6 +30,21 @@ const good = results.filter(Boolean);
 Globals inside a script: `agent()`, `parallel()`, `pipeline()`, `phase()`,
 `log()`, `args`.
 
+## Install as an agent plugin
+
+The repo carries a manifest for each harness; all resolve to the shared
+`skills/agentflow/` directory.
+
+| Harness | Install |
+|---|---|
+| Devin | `devin plugins install --local /path/to/agentflow` (reads `.devin-plugin/`) |
+| Claude Code | symlink or copy into your plugin dir; `.claude-plugin/plugin.json` present — though inside Claude, prefer the native Workflow tool |
+| Codex | `.codex-plugin/plugin.json` present; copy `skills/agentflow/` to `$CODEX_HOME/skills/` |
+| OpenCode | see `.opencode/INSTALL.md` — copy `skills/agentflow/` to `~/.config/opencode/skills/` |
+
+The `agents/worker.md` profile gives Devin a cheap disposable subagent
+(`claude-haiku-5-5-low`) for extraction-class fan-out.
+
 ## Docs
 
 - `skills/agentflow/SKILL.md` — agent-facing guidance (installed per harness)

@@ -5,8 +5,8 @@ export const meta = { name: 'devin-smoke', description: 'two-agent live smoke te
 
 phase('smoke');
 const [a, b] = await parallel([
-  () => agent('Reply with exactly: ALPHA', { label: 'smoke-a', model: 'devin-lite' }),
-  () => agent('Reply with exactly: BRAVO', { label: 'smoke-b', model: 'devin-lite' }),
+  () => agent('Reply with exactly: ALPHA', { label: 'smoke-a', model: 'claude-haiku-5-5-low' }),
+  () => agent('Reply with exactly: BRAVO', { label: 'smoke-b', model: 'claude-haiku-5-5-low' }),
 ]);
 log(`a=${a?.text ?? 'null'} b=${b?.text ?? 'null'}`);
 

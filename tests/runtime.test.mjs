@@ -254,3 +254,28 @@ log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('cache: identical calls memoize across reruns without spawning', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const a = await agent('same prompt', {label:'a'});
+const b = await agent('same prompt', {label:'b'});
+log('R:' + a.text + '|' + b.text);`);
+    await f.run({ cache: true });
+    // Sequential identical calls: second is a cache hit — only 1 spawn, 1 cache file.
+    assert.equal(calls.length, 1);
+    assert.ok(f.lines.some((l) => l.includes('b -> cache')));
+
+    // New run (new runId): both calls hit the content-keyed cache.
+    const before = f.lines.length;
+    await f.run({ cache: true });
+    assert.equal(calls.length, 0);
+    assert.equal(f.lines.slice(before).filter((l) => l.includes('-> cache')).length, 2);
+
+    // Without --cache, the same script re-executes both calls.
+    await f.run({ cache: false });
+    assert.equal(calls.length, 2);
+  } finally {
+    f.cleanup();
+  }
+});

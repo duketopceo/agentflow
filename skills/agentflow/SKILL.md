@@ -75,7 +75,12 @@ Constraints:
 | `codex` | `codex exec` | `-m` | native `--output-schema` | `--worktree` | `--dangerously-bypass-approvals-and-sandbox` |
 | `opencode` | `opencode run --format json` | `-m provider/model` | prompt-level | no | `--auto` |
 | `ori` | `ori code -p` | `--model <openrouter-slug>` — any model on OpenRouter | prompt-level | no | `self-drive` (binary approval surface; `manual` stalls headless) |
+| `openrouter` | in-process `POST /chat/completions` — **no subprocess, no tools** | OR slug (default `z-ai/glm-5.3-flash`) | prompt-level | n/a | n/a — needs `OPENROUTER_API_KEY` in env |
 | `echo` | none (test adapter) | — | canned | — | — |
+
+`openrouter` is the cheapest surface — use it for tool-free stages
+(decompose, classify, verify prose, synthesize); harness adapters only where
+agents need the filesystem. `:batch` slugs do NOT work (separate async API).
 
 **`--via ori`** wraps workers in Ori's OpenRouter environment
 (`ori claude -p ...`) — the harness keeps its own flags and parsing, but
@@ -95,11 +100,17 @@ prompt fail with `permissionDenied` journaled — prefer widening the prompt or
 
 ## Cost discipline
 
-Every `agent()` is a full session — each call costs real tokens plus seconds of
-startup. Prefer cheap models for extraction/labeling stages
-(`model: 'claude-haiku-5-5-low'` on devin, `provider/model` equivalents
-elsewhere) and reserve strong models for synthesis. A 50-agent fan-out on a
-premium model is expensive by design-free accident.
+Every harness `agent()` is a full session — real tokens plus seconds of
+startup; `openrouter` adapter calls are a single completion (~$0.01–0.05).
+Measured numbers and per-model tables: `docs/research/orchestration-economics.md`.
+Prefer cheap models for extraction/verification volume
+(`z-ai/glm-5.3-flash`, `openai/gpt-6-luna`, `deepseek/deepseek-v4.1-flash`,
+`claude-haiku-5-5-low` on devin which is ~$0.10/$0.50, free `swe-2-*`) and
+reserve strong models for the synthesis call. Worker tier × N dominates —
+orchestrator price barely matters. `--cache` memoizes identical calls
+content-keyed across reruns; the research says: fan out on parallelizable
+sub-questions, always end in centralized synthesis/verification
+(independent agents amplify errors ~17×), and don't fan out sequential work.
 
 ## Safety
 

@@ -8,7 +8,8 @@ const USAGE = `agentflow — cross-harness dynamic workflows
 
 usage:
   agentflow run <script.mjs> [--harness <name>] [--concurrency <n>]
-                [--via ori] [--resume <run-id>] [--grace <ms>] [--cwd <dir>]
+                [--via ori] [--cache] [--resume <run-id>] [--grace <ms>]
+                [--cwd <dir>]
                 [-- <script args>...]
   agentflow doctor
   agentflow list
@@ -65,6 +66,7 @@ export async function main(argv = process.argv.slice(2)) {
       cwd,
       args: flags.scriptArgs ?? [],
       via: flags.via ?? config.via ?? null,
+      cache: !!(flags.cache || config.cache),
       resumeId: flags.resume ?? null,
       graceMs: flags.grace ? Number(flags.grace) : undefined,
     });

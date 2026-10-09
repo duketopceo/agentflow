@@ -9,6 +9,7 @@ import claude from '../src/adapters/claude.mjs';
 import codex from '../src/adapters/codex.mjs';
 import opencode from '../src/adapters/opencode.mjs';
 import ori from '../src/adapters/ori.mjs';
+import openrouter from '../src/adapters/openrouter.mjs';
 import { adapters } from '../src/adapters/index.mjs';
 
 const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
@@ -124,8 +125,8 @@ test('ori reasoningEffort emits native flag', () => {
   assert.ok(ori.buildArgv(spec({ reasoningEffort: 'low' })).includes('low'));
 });
 
-test('adapter registry exposes all six harnesses', () => {
-  assert.deepEqual(Object.keys(adapters).sort(), ['claude', 'codex', 'devin', 'echo', 'opencode', 'ori']);
+test('adapter registry exposes all harnesses', () => {
+  assert.deepEqual(Object.keys(adapters).sort(), ['claude', 'codex', 'devin', 'echo', 'opencode', 'openrouter', 'ori']);
 });
 
 test('probeBinary reports missing binary without throwing', async () => {
@@ -140,4 +141,25 @@ test('spawnProcess captures stdout, exit code, and timeout', async () => {
   assert.equal(ok.stdout.trim(), 'hi');
   const slow = await spawnProcess(['node', '-e', 'setTimeout(()=>{},5000)'], { timeout: 100 });
   assert.equal(slow.timedOut, true);
+});
+
+test('openrouter buildBody: model default, prompt, reasoning, no tools', () => {
+  const b = openrouter.buildBody(spec({ model: 'z-ai/glm-5.3-flash' }));
+  assert.equal(b.model, 'z-ai/glm-5.3-flash');
+  assert.equal(b.messages[0].role, 'user');
+  assert.equal(b.messages[0].content, 'review this file');
+  assert.equal(b.tools, undefined);
+  assert.equal(openrouter.buildBody(spec({ reasoningEffort: 'low' })).reasoning.effort, 'low');
+});
+
+test('openrouter spawnAgent fails cleanly without a key', async () => {
+  const key = process.env.OPENROUTER_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+  try {
+    const r = await openrouter.spawnAgent(spec());
+    assert.equal(r.ok, false);
+    assert.match(r.error.message, /OPENROUTER_API_KEY/);
+  } finally {
+    if (key) process.env.OPENROUTER_API_KEY = key;
+  }
 });

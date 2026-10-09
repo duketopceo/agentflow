@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { Pool } from './pool.mjs';
 import { Journal } from './journal.mjs';
+import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
 
 const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort']);
 const DEFAULT_GRACE_MS = 8000;
@@ -47,6 +48,7 @@ export async function runScript(opts) {
     resumeId = null,
     graceMs = DEFAULT_GRACE_MS,
     via = null,
+    cache = false,
     err = (s) => process.stderr.write(s + '\n'),
   } = opts;
 
@@ -103,6 +105,15 @@ export async function runScript(opts) {
       return rec.ok ? rec.result : null;
     }
 
+    const cKey = cache ? cacheKey(adapter.name, { ...spec, cwd: spec.cwd ?? cwd }) : null;
+    if (cKey) {
+      const hit = cacheRead(cwd, cKey);
+      if (hit !== undefined) {
+        logLine(`${spec.label} -> cache`);
+        return hit;
+      }
+    }
+
     const started = Date.now();
     // Journaling lives inside the task so inFlight.empty => durable record.
     // Returns {cancelled:true} when the call never genuinely ran: drained
@@ -117,6 +128,7 @@ export async function runScript(opts) {
         const secs = ((Date.now() - started) / 1000).toFixed(1);
         if (s.ok) {
           journal.append({ type: 'agent', i, label: spec.label, ok: true, result: s.result, model: spec.model ?? null, elapsed: secs, at: new Date().toISOString() });
+          if (cKey) cacheWrite(cwd, cKey, s.result);
           return { ok: true, result: s.result, elapsed: secs };
         }
         journal.append({ type: 'agent', i, label: spec.label, ok: false, error: s.error, model: spec.model ?? null, elapsed: secs, at: new Date().toISOString() });

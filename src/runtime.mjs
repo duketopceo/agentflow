@@ -8,6 +8,21 @@ const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd',
 const DEFAULT_GRACE_MS = 8000;
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
+// Determinism lint — mirror of Claude's inline-Workflow contract. A
+// nondeterministic script body silently misaligns --resume's positional replay;
+// --cache survives it but the journal trust does not. Reports real line numbers.
+const NONDETERMINISTIC = /\b(?:Date\.now|Math\.random|new Date|crypto\.randomUUID)\b/g;
+export function lintDeterminism(source) {
+  // Blank out quoted strings so 'new Date' in a literal doesn't false-positive.
+  // Template literals are kept: `${}` interpolations can hold real calls.
+  const scanned = source.replace(/(['"])(?:\\.|(?!\1)[^\\\n])*\1/g, '""');
+  const hits = [];
+  for (const m of scanned.matchAll(NONDETERMINISTIC)) {
+    hits.push({ line: scanned.slice(0, m.index).split('\n').length, construct: m[0] });
+  }
+  return hits;
+}
+
 // Extract `export const meta = {...}` — the script's only supported export.
 // The object is a plain literal (same constraint as Claude's workflow meta);
 // it is removed from the evaluated source because `export` is illegal inside
@@ -49,6 +64,7 @@ export async function runScript(opts) {
     graceMs = DEFAULT_GRACE_MS,
     via = null,
     cache = false,
+    maxAgents = 1000,
     err = (s) => process.stderr.write(s + '\n'),
   } = opts;
 
@@ -67,6 +83,15 @@ export async function runScript(opts) {
   } catch (e) {
     err(`agentflow: ${e.message}`);
     return { code: 1 };
+  }
+
+  if (opts.strict) {
+    const hits = lintDeterminism(source);
+    if (hits.length) {
+      for (const h of hits) err(`agentflow: line ${h.line}: ${h.construct} is nondeterministic (--strict)`);
+      err('agentflow: nondeterministic scripts silently misalign --resume replays; fix or drop --strict');
+      return { code: 1 };
+    }
   }
 
   // Resume: replay settled results by call index, re-execute the rest.
@@ -92,6 +117,7 @@ export async function runScript(opts) {
 
   async function agent(prompt, agentOpts = {}) {
     const i = callIndex++;
+    if (i >= maxAgents) throw new Error(`agent-count cap exceeded (max ${maxAgents})`);
     const spec = { prompt: String(prompt), label: agentOpts.label ?? `agent-${i}` };
     for (const [k, v] of Object.entries(agentOpts)) {
       if (KNOWN_AGENT_OPTS.has(k)) spec[k] = v;

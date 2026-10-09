@@ -90,16 +90,23 @@ export function classifyFailure(r, patterns = []) {
 // cline, pi, muse, omp, prime-agent. Not devin.
 const ORI_WRAPPED = new Set(['claude', 'codex', 'opencode', 'grok', 'kilo', 'hermes', 'cline', 'pi', 'muse', 'omp', 'prime-agent']);
 
-// `via: 'ori'` prepends `ori` to the harness argv (ori <name> injects
-// OpenRouter env and passes the rest through). Ori consumes --model and
-// --reasoning-effort itself in wrapper mode; --reasoning-effort is injected
-// right after the harness name so ori translates it natively. Pure for tests.
+// `via: 'ori'` rewrites the harness argv into `ori <name>` form. Ori consumes
+// --model and --reasoning-effort itself in wrapper mode and translates both to
+// the harness's native mechanism — so the adapter's own model flag (modelFlag)
+// is stripped and re-injected as ori's --model after the harness name.
+// Pure for testability.
 export function applyVia(adapter, argv, spec) {
   if (spec.via !== 'ori' || adapter.bin === 'ori') return { argv };
   if (!ORI_WRAPPED.has(adapter.bin)) return { error: `--via ori: no 'ori ${adapter.bin}' launcher` };
-  const wrapped = ['ori', ...argv];
-  if (spec.reasoningEffort) wrapped.splice(2, 0, '--reasoning-effort', spec.reasoningEffort);
-  return { argv: wrapped };
+  const rest = argv.slice(1); // binary name becomes the ori subcommand
+  const inject = [];
+  if (spec.model && adapter.modelFlag) {
+    const j = rest.indexOf(adapter.modelFlag);
+    if (j !== -1) rest.splice(j, 2);
+    inject.push('--model', spec.model);
+  }
+  if (spec.reasoningEffort) inject.push('--reasoning-effort', spec.reasoningEffort);
+  return { argv: ['ori', adapter.bin, ...inject, ...rest] };
 }
 
 // Generic spawnAgent given an adapter's buildArgv/parse/permissionDeniedPatterns.

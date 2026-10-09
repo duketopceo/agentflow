@@ -1,0 +1,5 @@
+{"type":"step_start","part":{"type":"step-start"}}
+{"type":"text","part":{"type":"text","text":"first part"}}
+{"type":"tool_use","part":{"type":"tool","tool":"read","state":{"status":"completed"}}}
+{"type":"text","part":{"type":"text","text":"second part"}}
+{"type":"step_finish","part":{"type":"step-finish","reason":"stop"}}

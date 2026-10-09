@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+import { main } from '../src/cli.mjs';
+
+main().then(
+  (code) => process.exit(code ?? 0),
+  (e) => { process.stderr.write(`agentflow: ${e?.stack ?? e}\n`); process.exit(1); },
+);

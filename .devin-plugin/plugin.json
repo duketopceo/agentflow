@@ -1,6 +1,6 @@
 {
   "name": "agentflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Cross-harness dynamic workflows: script-driven multi-agent orchestration for devin, claude, codex, opencode",
   "author": {
     "name": "Luke Kimball"
@@ -14,7 +14,10 @@
     "parallel-agents",
     "agent-harness"
   ],
-  "optionalPlugins": [
-    { "source": "github", "repo": "EveryInc/compound-engineering-plugin" }
+  "requiredPlugins": [
+    {
+      "source": "github",
+      "repo": "EveryInc/compound-engineering-plugin"
+    }
   ]
 }

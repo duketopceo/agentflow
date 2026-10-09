@@ -1,6 +1,6 @@
 {
   "name": "agentflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Cross-harness dynamic workflows: script-driven multi-agent orchestration for devin, claude, codex, opencode",
   "type": "module",
   "bin": {
@@ -14,5 +14,8 @@
     "node": ">=20"
   },
   "license": "MIT",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.34"
+  }
 }

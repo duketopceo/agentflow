@@ -112,6 +112,12 @@ content-keyed across reruns; the research says: fan out on parallelizable
 sub-questions, always end in centralized synthesis/verification
 (independent agents amplify errors ~17×), and don't fan out sequential work.
 
+**Guards:** `--strict` rejects scripts using `Date.now`, `Math.random`,
+`new Date`, or `crypto.randomUUID` in the body (line-numbered errors, before
+any agent spawns) — nondeterminism silently misaligns `--resume`'s positional
+replay. `--max-agents <n>` (default 1000) caps total `agent()` calls per run.
+Both are settable in `agentflow.json` (`"strict": true`, `"maxAgents": 200`).
+
 ## Safety
 
 **A workflow script is arbitrary code that spawns credentialed agents.** Never
@@ -140,6 +146,9 @@ Proven composition patterns (mirror Claude's own):
   specialized follow-up agent per class.
 - **Fan-out + adversarial verify**: every researcher's finding gets a separate
   verifier agent before it reaches synthesis (see `workflows/deep-research.mjs`).
+- **Compound loop**: plan -> work -> review -> compound as staged agents —
+  `workflows/compound-loop.mjs` runs the compound-engineering loop; each
+  stage is a fresh-context agent sharing cwd (needs the CE plugin installed).
 - **Multi-angle drafting**: N agents draft the same plan/spec from different
   stated angles; a judge agent weighs them.
 - **Map-reduce migration**: per-file transforms in parallel, then a sweep

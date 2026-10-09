@@ -37,18 +37,21 @@ The repo carries a manifest for each harness; all resolve to the shared
 
 | Harness | Install |
 |---|---|
-| Devin | `devin plugins install --local /path/to/agentflow` (reads `.devin-plugin/`) |
-| Claude Code | symlink or copy into your plugin dir; `.claude-plugin/plugin.json` present — though inside Claude, prefer the native Workflow tool |
-| Codex | `.codex-plugin/plugin.json` present; copy `skills/agentflow/` to `$CODEX_HOME/skills/` |
-| OpenCode | see `.opencode/INSTALL.md` — copy `skills/agentflow/` to `~/.config/opencode/skills/` |
+| Devin | `devin plugins install --local /path/to/agentflow` (reads `.devin-plugin/`; auto-installs the compound-engineering plugin via `requiredPlugins`) |
+| Claude Code | `claude plugin marketplace add duketopceo/agentflow` → `.claude-plugin/` — though inside Claude, prefer the native Workflow tool |
+| Codex | `codex plugin marketplace add duketopceo/agentflow` → `.codex-plugin/` |
+| OpenCode | `opencode plugin add github:duketopceo/agentflow` — native plugin with `agentflow_run`/`agentflow_doctor` tools; see `.opencode/INSTALL.md` |
+| Ori/OpenRouter | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` or `--via ori` |
 
 The `agents/worker.md` profile gives Devin a cheap disposable subagent
-(`claude-haiku-5-5-low`) for extraction-class fan-out.
+(`swe-2-*` free tier or `claude-haiku-5-5-low`) for extraction-class fan-out.
 
 ## Docs
 
 - `skills/agentflow/SKILL.md` — agent-facing guidance (installed per harness)
 - `docs/plans/` — design history
+- `docs/smoke-matrix.md` — live per-adapter verification results
+- `docs/research/` — cross-harness landscape + orchestration economics
 
 ## Status
 

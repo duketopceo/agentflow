@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { extractJson, classifyFailure, probeBinary, spawnProcess } from '../src/adapters/base.mjs';
+import { extractJson, classifyFailure, probeBinary, spawnProcess, applyVia } from '../src/adapters/base.mjs';
 import devin from '../src/adapters/devin.mjs';
 import claude from '../src/adapters/claude.mjs';
 import codex from '../src/adapters/codex.mjs';
 import opencode from '../src/adapters/opencode.mjs';
+import ori from '../src/adapters/ori.mjs';
 import { adapters } from '../src/adapters/index.mjs';
 
 const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
@@ -91,8 +92,31 @@ test('opencode parse tolerates malformed lines', () => {
   assert.equal(r.text, 'real');
 });
 
-test('adapter registry exposes all five harnesses', () => {
-  assert.deepEqual(Object.keys(adapters).sort(), ['claude', 'codex', 'devin', 'echo', 'opencode']);
+test('ori buildArgv: code -p, self-drive approvals, openrouter model slug', () => {
+  const argv = ori.buildArgv(spec({ model: 'x-ai/grok-4-fast' }));
+  assert.deepEqual(argv.slice(0, 2), ['ori', 'code']);
+  assert.ok(argv.includes('--prompt') && argv.includes('review this file'));
+  assert.ok(argv.includes('--output') && argv.includes('text'));
+  assert.ok(argv.includes('--approvals') && argv.includes('self-drive'));
+  assert.ok(argv.includes('--model') && argv.includes('x-ai/grok-4-fast'));
+});
+
+test('ori parse: stdout text, schema extraction', () => {
+  const r = ori.parse({ stdout: 'Result.\n```json\n{"ok":true}\n```' }, spec({ schema: { type: 'object' } }));
+  assert.deepEqual(r.json, { ok: true });
+});
+
+test('applyVia wraps wrappable harnesses, rejects others, direct is noop', () => {
+  const argv = claude.buildArgv(spec());
+  assert.deepEqual(applyVia(claude, argv, spec({ via: 'ori' })).argv.slice(0, 2), ['ori', 'claude']);
+  assert.deepEqual(applyVia(opencode, opencode.buildArgv(spec()), spec({ via: 'ori' })).argv.slice(0, 2), ['ori', 'opencode']);
+  assert.ok(applyVia(devin, devin.buildArgv(spec()), spec({ via: 'ori' })).error);
+  assert.deepEqual(applyVia(claude, argv, spec({ via: 'direct' })).argv[0], 'claude');
+  assert.deepEqual(applyVia(claude, argv, spec()).argv[0], 'claude');
+});
+
+test('adapter registry exposes all six harnesses', () => {
+  assert.deepEqual(Object.keys(adapters).sort(), ['claude', 'codex', 'devin', 'echo', 'opencode', 'ori']);
 });
 
 test('probeBinary reports missing binary without throwing', async () => {

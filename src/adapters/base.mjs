@@ -85,9 +85,26 @@ export function classifyFailure(r, patterns = []) {
   };
 }
 
+// Harnesses `ori` can wrap (ori <name> injects OpenRouter env, rest passthrough).
+// Verified against `ori --help`: claude, codex, opencode, grok, kilo, hermes,
+// cline, pi, muse, omp, prime-agent. Not devin.
+const ORI_WRAPPED = new Set(['claude', 'codex', 'opencode', 'grok', 'kilo', 'hermes', 'cline', 'pi', 'muse', 'omp', 'prime-agent']);
+
+// `via: 'ori'` prepends `ori` to the harness argv (ori <name> injects
+// OpenRouter env and passes the rest through). Pure for testability.
+export function applyVia(adapter, argv, spec) {
+  if (spec.via !== 'ori') return { argv };
+  if (!ORI_WRAPPED.has(adapter.bin)) return { error: `--via ori: no 'ori ${adapter.bin}' launcher` };
+  return { argv: ['ori', ...argv] };
+}
+
 // Generic spawnAgent given an adapter's buildArgv/parse/permissionDeniedPatterns.
 export async function spawnAgent(adapter, spec) {
-  const argv = adapter.buildArgv(spec);
+  const wrapped = applyVia(adapter, adapter.buildArgv(spec), spec);
+  if (wrapped.error) {
+    return { ok: false, error: { message: wrapped.error, stderrTail: '', code: null, timedOut: false, permissionDenied: false } };
+  }
+  const argv = wrapped.argv;
   const r = await spawnProcess(argv, { cwd: spec.cwd, timeout: spec.timeout, signal: spec.signal, env: adapter.buildEnv?.(spec) });
   if (r.spawnError) return { ok: false, error: classifyFailure(r, adapter.permissionDeniedPatterns) };
   if (r.code === 0 && !r.timedOut) {

@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { Pool } from './pool.mjs';
 import { Journal } from './journal.mjs';
 
-const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission']);
+const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via']);
 const DEFAULT_GRACE_MS = 8000;
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
@@ -46,6 +46,7 @@ export async function runScript(opts) {
     args = [],
     resumeId = null,
     graceMs = DEFAULT_GRACE_MS,
+    via = null,
     err = (s) => process.stderr.write(s + '\n'),
   } = opts;
 
@@ -94,6 +95,7 @@ export async function runScript(opts) {
       if (KNOWN_AGENT_OPTS.has(k)) spec[k] = v;
       else logLine(`warning: unknown agent() option '${k}' ignored`);
     }
+    if (via && !spec.via) spec.via = via;
 
     if (prior?.settled.has(i)) {
       const rec = prior.settled.get(i);

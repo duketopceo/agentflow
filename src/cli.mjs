@@ -8,11 +8,12 @@ const USAGE = `agentflow — cross-harness dynamic workflows
 
 usage:
   agentflow run <script.mjs> [--harness <name>] [--concurrency <n>]
-                [--resume <run-id>] [--grace <ms>] [--cwd <dir>] [-- <script args>...]
+                [--via ori] [--resume <run-id>] [--grace <ms>] [--cwd <dir>]
+                [-- <script args>...]
   agentflow doctor
   agentflow list
 
-config: agentflow.json in cwd — {"harness": "devin", "concurrency": 8}
+config: agentflow.json in cwd — {"harness": "devin", "concurrency": 8, "via": "ori"}
 `;
 
 function parseFlags(argv) {
@@ -63,6 +64,7 @@ export async function main(argv = process.argv.slice(2)) {
       concurrency: Number(flags.concurrency ?? config.concurrency) || 8,
       cwd,
       args: flags.scriptArgs ?? [],
+      via: flags.via ?? config.via ?? null,
       resumeId: flags.resume ?? null,
       graceMs: flags.grace ? Number(flags.grace) : undefined,
     });

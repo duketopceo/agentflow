@@ -60,6 +60,28 @@ Conclusion: cross-harness *delegation* is crowded; cross-harness *plan-as-code*
 | codex | `codex plugin marketplace add owner/repo` + `codex plugin add name@marketplace`; `.codex-plugin/` manifest (CE convention); skills + prompts | manifest + skills; commands surface as prompts (CE converter pattern) |
 | opencode | `opencode plugin <module>` — **npm package (JS/TS module)**, not a manifest; project `.opencode/` dir; commands via `~/.config/opencode/commands/*.md`; reads AGENTS.md | `.opencode/INSTALL.md` interim; a real opencode plugin would be a small TS module wrapping `bin/agentflow` |
 
+### Ori (OpenRouter) — two integration surfaces
+
+Ori is OpenRouter's agent launcher + native coding agent, installed here.
+
+- **`ori code`** — Ori's own agent loop, headless-capable:
+  `-p/--prompt`, `--model <openrouter-slug>` (any OR model),
+  `--output text|jsonl`, `--approvals self-drive|manual`,
+  `--reasoning-effort`, `--resume/--session`. Approval surface is binary:
+  `manual` returns agent questions to the caller (stalls headless), so the
+  adapter maps both postures to `self-drive`. → `--harness ori` adapter.
+- **`ori <harness>`** — launches claude/codex/opencode/grok/kilo/hermes/
+  cline/pi/muse/omp/prime-agent with OpenRouter env injected; remaining args
+  pass through untouched. Ori subcommand names equal binary names, so the
+  wrap is a literal `['ori', ...argv]` prepend — implemented as spec `via:
+  'ori'` / CLI `--via ori`. Workers keep their harness's flags and output
+  parsing while credentials + models route through OpenRouter. This is the
+  cheap-model lever: a workflow can run claude-harness workers on
+  `x-ai/grok-4-fast` or `deepseek/*` without touching Anthropic billing.
+  Caveat: recent Ori versions prompt to confirm a project-discovered key
+  before first spend — headless callers must pre-approve (`ori auth` /
+  `ori login --with-key` or `OPENROUTER_API_KEY`).
+
 "One plugin for them all" is literally true only on devin (`optionalPlugins`
 pulls the CE suite alongside). Elsewhere it's one repo, one install per
 harness — the shared `skills/` + `workflows/` content is identical.

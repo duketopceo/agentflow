@@ -74,7 +74,16 @@ Constraints:
 | `claude` | `claude -p --output-format json` | `--model` | prompt-level | no | `bypassPermissions` |
 | `codex` | `codex exec` | `-m` | native `--output-schema` | `--worktree` | `--dangerously-bypass-approvals-and-sandbox` |
 | `opencode` | `opencode run --format json` | `-m provider/model` | prompt-level | no | `--auto` |
+| `ori` | `ori code -p` | `--model <openrouter-slug>` — any model on OpenRouter | prompt-level | no | `self-drive` (binary approval surface; `manual` stalls headless) |
 | `echo` | none (test adapter) | — | canned | — | — |
+
+**`--via ori`** wraps claude/codex/opencode workers in Ori's OpenRouter
+environment (`ori claude -p ...`) — the harness keeps its own flags and
+parsing, but credentials and `model:` values route through OpenRouter
+(`model: 'x-ai/grok-4-fast'`, `deepseek/...`, etc.). Requires `ori` on PATH;
+`--via` on the CLI or `via: 'ori'` in `agentflow.json` applies to every
+`agent()` call; a call can opt out with `via: 'direct'`. No `ori` launcher
+exists for devin.
 
 Default permission postures are least-privilege (`smart` devin / `auto` claude /
 `workspace-write` codex / none opencode). Headless agents that hit an approval

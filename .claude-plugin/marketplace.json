@@ -1,0 +1,22 @@
+{
+  "name": "agentflow",
+  "owner": {
+    "name": "Luke Kimball"
+  },
+  "metadata": {
+    "description": "Agentflow plugin marketplace",
+    "version": "0.2.0"
+  },
+  "plugins": [
+    {
+      "name": "agentflow",
+      "description": "Cross-harness dynamic workflows: script-driven multi-agent orchestration",
+      "author": {
+        "name": "Luke Kimball"
+      },
+      "homepage": "https://github.com/duketopceo/agentflow",
+      "tags": ["workflows", "orchestration", "multi-agent", "parallel-agents"],
+      "source": "./"
+    }
+  ]
+}

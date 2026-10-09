@@ -57,8 +57,9 @@ replays settled results and re-runs only what never finished.
 
 Constraints:
 
-- `export const meta = { name, description }` is the only export; it must be a
-  **plain object literal**.
+- `export const meta = { name, description, phases }` is the only export; it
+  must be a **plain object literal**. `phases` is an array of phase-name
+  strings matching your `phase()` calls (parity with Claude's native contract).
 - No static `import`/`export` — scripts are self-contained. Dynamic
   `await import('node:fs')` works.
 - Determinism is your job: resume replays by call order, so keep `agent()`
@@ -96,10 +97,35 @@ sandboxed subprocess per line. The runner inherits your harness credentials and
 workspace permissions. Keep `.agentflow/` out of git (it is gitignored here;
 journals contain prompt and result text).
 
-## Authoring pattern
+## Authoring workflows (the point of the feature)
+
+When a task fits "When to use", **you write the script** — the orchestration
+plan is code you author, the runner just executes it. The workflow:
+
+1. Decompose the task into independent units an agent can do in one session.
+2. Decide phases: what runs in parallel, what waits, what verifies.
+3. Choose models per stage — cheap model for extraction/verification volume,
+   default/strong model only for synthesis or hard judgment.
+4. Write the `.mjs` to scratch (`.agentflow/workflows/` or `/tmp`), show it to
+   the user before running — the untrusted-script rule applies to scripts you
+   write too.
+5. Run it, report the synthesis, keep the journal's `run <id>` for resume.
+
+Proven composition patterns (mirror Claude's own):
+
+- **Classifier routing**: one agent classifies each item, routes to a
+  specialized follow-up agent per class.
+- **Fan-out + adversarial verify**: every researcher's finding gets a separate
+  verifier agent before it reaches synthesis (see `workflows/deep-research.mjs`).
+- **Multi-angle drafting**: N agents draft the same plan/spec from different
+  stated angles; a judge agent weighs them.
+- **Map-reduce migration**: per-file transforms in parallel, then a sweep
+  agent checks integration points the per-file view can't see.
+
+## Minimal pattern
 
 ```js
-export const meta = { name: 'audit', description: 'per-file review' };
+export const meta = { name: 'audit', description: 'per-file review', phases: ['fan-out', 'synthesize'] };
 
 phase('fan-out');
 const reviews = await parallel(files.map(f => () =>

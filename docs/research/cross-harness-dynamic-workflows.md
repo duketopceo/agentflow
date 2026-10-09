@@ -1,0 +1,97 @@
+# Research: cross-harness dynamic workflows
+
+What Claude shipped, what exists in the open, and where agentflow sits.
+Gathered 2026-10-08 from official docs, the reverse-engineered claude-code
+source (Icarus603/claude-code `WorkflowTool.ts`), the Agent SDK cookbook, and
+live `--help`/plugin-manager output from the CLIs installed on this machine.
+
+## 1. The Claude reference implementation, verified
+
+Dynamic workflows = a `Workflow` tool (alias `RunWorkflow`) that compiles a
+Claude-authored JavaScript script and runs it in a **vm-sandboxed background
+executor**, returning a task id immediately. Requires CLI >= 2.1.154
+(`claude-agent-sdk` >= 0.2.90 bundles it); GA on paid plans, API, Bedrock,
+Vertex, Foundry.
+
+Script contract (from `WorkflowTool.ts` validation):
+
+- Script MUST begin with `export const meta = { name, description, phases }` —
+  a pure object literal, statically parsed (`metaParser.js`).
+- **Determinism guard**: inline scripts containing `Date.now` (and likely
+  `Math.random`-class calls) are rejected — "reject non-determinism in an
+  inline script body". Keeps reruns replayable and forces volatile lookups
+  through agent calls.
+- Globals: `agent()`, `parallel()`, `pipeline()` + standard JS (JSON, Math,
+  Array). Per-agent: clean context, session cwd, configured tool allowlist,
+  optional `model` routing, optional `worktree` isolation.
+- Caps: **16 concurrent** (fewer on low-CPU machines), **1000 agents per run**;
+  excess work queues.
+- Env: `CLAUDE_CODE_SUBAGENT_MODEL` overrides all agent models;
+  `CLAUDE_CODE_WORKFLOWS=0` is the kill switch.
+- Built-in: `/deep-research`. Triggers: ask for a workflow, the `ultracode`
+  keyword, or `/effort ultracode`.
+- Documented patterns: classifier routing, fan-out/migration, adversarial
+  cross-review before reporting, multi-angle plan drafting.
+
+## 2. The competitive landscape — the gap is *dynamic*, not orchestration
+
+Everything below orchestrates multiple harness CLIs. **None of them let the
+agent author the orchestration per task** — the differentiator agentflow
+keeps.
+
+| Project | Harnesses | Shape | Dynamic scripts? |
+|---|---|---|---|
+| `valpere/chorus` | claude, opencode, gemini, codex, cursor, kilo | 6-way delegation mesh: `delegate_*` MCP tools + fixed commands (`council`, `review`, `vote`, `debug`) | No — fixed patterns |
+| `valianx/team-harness` | claude, codex, opencode | SDD pipeline, 12 specialist agents, human gates, file-based resume | No — static pipeline |
+| `b-open-io/orchestra` | claude, grok, codex, opencode | Worker dispatch, second opinion, wave fan-out, loops | No — fixed patterns |
+| `docker-agent` (PR 2796) | claude-code, codex, opencode, copilot, openclaw | YAML-declared harness-backed agents via `transfer_task`; NDJSON/JSONL/ACP protocols | No — declared teams |
+| `allOwO/opencode-codex-orch` | opencode only | Specialist team (orchestrator/executor/reviewer/oracle), GPT-focused, no Claude deps | No |
+| `claude-flow`, conductor | claude only | swarm/worktree fan-out | No / partial |
+
+Conclusion: cross-harness *delegation* is crowded; cross-harness *plan-as-code*
+(agent writes the orchestration) is unoccupied outside Claude Code itself.
+
+## 3. Install reality per harness (verified on this machine)
+
+| Harness | Plugin mechanism | agentflow surface |
+|---|---|---|
+| devin | `.devin-plugin/plugin.json`; `devin plugins install [owner/repo\|--local]`; **`requiredPlugins`/`optionalPlugins`/`forbiddenPlugins` auto-install** | manifest + `skills/` + `agents/` — CE linked via `optionalPlugins` |
+| claude | `.claude-plugin/plugin.json` + auto-discovered `skills/` `commands/` `agents/`; marketplaces | manifest + same dirs; **native Workflow preferred inside sessions** — agentflow claude adapter is for spawning `claude -p` workers |
+| codex | `codex plugin marketplace add owner/repo` + `codex plugin add name@marketplace`; `.codex-plugin/` manifest (CE convention); skills + prompts | manifest + skills; commands surface as prompts (CE converter pattern) |
+| opencode | `opencode plugin <module>` — **npm package (JS/TS module)**, not a manifest; project `.opencode/` dir; commands via `~/.config/opencode/commands/*.md`; reads AGENTS.md | `.opencode/INSTALL.md` interim; a real opencode plugin would be a small TS module wrapping `bin/agentflow` |
+
+"One plugin for them all" is literally true only on devin (`optionalPlugins`
+pulls the CE suite alongside). Elsewhere it's one repo, one install per
+harness — the shared `skills/` + `workflows/` content is identical.
+
+## 4. Fidelity gaps vs Claude native (deliberate or open)
+
+| Claude capability | agentflow status |
+|---|---|
+| In-process pooled executor, background task + task id | Subprocess per `agent()` (seconds startup); foreground run, Ctrl-C -> resumable journal. `--detach` mode is an open follow-up. |
+| Determinism guard (reject `Date.now`/`Math.random` in scripts) | Not enforced — SKILL.md teaches call-order stability instead. A `--strict` lint flag is a candidate follow-up. |
+| `meta.phases` required | Accepted and documented; not enforced. |
+| Per-agent worktree | `worktree` spec field exists; honored by codex (`--worktree`); devin `-p` has no flag — local CLI gap, documented. |
+| Per-agent cost/token reporting | Not surfaced — harness output formats vary. Follow-up. |
+| 16-concurrency / 1000-cap | Pool is unbounded by count (default 8); no run cap. Follow-up: `--max-agents`. |
+| `/deep-research` built-in | `workflows/deep-research.mjs` + `commands/deep-research.md` shipped. |
+
+## 5. Open questions
+
+- **opencode native plugin**: build the real npm module (tools + install) or
+  keep INSTALL.md? Probably worth it once the workflow API stabilizes.
+- **CE linkage depth**: `optionalPlugins` today. If the fuse goes deeper
+  (ce-loop-as-workflow scripts that express plan->work->review->compound as
+  `pipeline()` stages), consider `requiredPlugins` on the devin manifest.
+- **Codex manifest schema**: `.codex-plugin/plugin.json` mirrors CE's
+  convention; verify against codex's marketplace docs on first real install.
+- **Determinism lint**: Claude's guard exists for replay fidelity — our resume
+  already depends on stable call order, so a static check (`Date.now`,
+  `Math.random`, unsorted `readdir`) would catch real resume bugs.
+
+## 6. Naming
+
+`agentflow`: free on npm (`agent-flow` is taken, 0.0.2), repo already named.
+Collision: Stanford's academic AgentFlow research framework — a paper/repo,
+not a packaged product in this space. Acceptable; rename cost is low (GitHub
+redirects survive).

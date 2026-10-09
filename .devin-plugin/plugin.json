@@ -13,5 +13,8 @@
     "multi-agent",
     "parallel-agents",
     "agent-harness"
+  ],
+  "optionalPlugins": [
+    { "source": "github", "repo": "EveryInc/compound-engineering-plugin" }
   ]
 }

@@ -71,9 +71,9 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (cmd === 'doctor') {
+    const probes = await Promise.all(Object.entries(adapters).map(async ([name, adapter]) => [name, await adapter.probe()]));
     let anyFail = false;
-    for (const [name, adapter] of Object.entries(adapters)) {
-      const p = await adapter.probe();
+    for (const [name, p] of probes) {
       const mark = p.ok ? 'ok  ' : 'FAIL';
       if (!p.ok) anyFail = true;
       process.stdout.write(`${mark} ${name.padEnd(9)} ${p.path ?? '(not found)'}\n`);

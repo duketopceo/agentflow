@@ -58,6 +58,15 @@ export function extractJson(text) {
   return null;
 }
 
+// Prompt-level schema enforcement for adapters without a native flag.
+export function withSchemaPrompt(spec) {
+  if (!spec.schema) return spec;
+  return {
+    ...spec,
+    prompt: `${spec.prompt}\n\nRespond with only a JSON object matching this schema, no prose:\n${JSON.stringify(spec.schema)}`,
+  };
+}
+
 // permissionDeniedPatterns: adapter-supplied regexes matched against stderr+stdout
 // when the process exits nonzero. Keeps headless approval-stalls distinct from
 // ordinary agent failure.

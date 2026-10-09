@@ -1,4 +1,4 @@
-import { spawnAgent as run, extractJson, probeBinary } from './base.mjs';
+import { spawnAgent as run, extractJson, probeBinary, withSchemaPrompt } from './base.mjs';
 
 // Verified against `claude --help` (2.x):
 //   -p/--print, --output-format json (single result object with .result),
@@ -24,10 +24,7 @@ export default {
   },
 
   async spawnAgent(spec) {
-    const s = spec.schema
-      ? { ...spec, prompt: `${spec.prompt}\n\nRespond with only a JSON object matching this schema, no prose:\n${JSON.stringify(spec.schema)}` }
-      : spec;
-    return run(this, s);
+    return run(this, withSchemaPrompt(spec));
   },
 
   parse(r, spec) {

@@ -33,3 +33,15 @@ Cost posture: free/cheap routes only — no Anthropic or premium spend.
   (there is no `swe-2-lite`); `claude-haiku-5-5-low` remains the cheap paid pin.
 - **codex prints `Reading additional input from stdin...`** with piped stdin —
   harmless; `stdio: ['ignore']` gives it EOF and it proceeds.
+
+## End-to-end: deep-research on openrouter/glm-5.3-flash
+
+`agentflow run deep-research.mjs --harness openrouter` (all stages glm):
+decompose (6 sub-questions) → 5/6 researchers returned → adversarial
+cross-check → synthesis. ~308s wall, ~12 calls, ~$0.003 total spend.
+
+**Finding:** `z-ai/glm-5.3-flash` intermittently returns `empty completion`
+under burst concurrency (5 of 12 calls) — the runner journals them as failed
+(`null`) and the workflow degrades gracefully, but cheap-model flakiness is
+real. A `retries` spec opt or automatic single-retry-on-empty is a candidate
+follow-up; `--cache` + `--resume` already bound re-run cost.

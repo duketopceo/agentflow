@@ -1,0 +1,5 @@
+{
+  "name": "agentflow",
+  "version": "0.1.0",
+  "description": "Cross-harness dynamic workflows: script-driven multi-agent orchestration for devin, claude, codex, opencode"
+}

@@ -1,0 +1,11 @@
+{
+  "harness": "devin",
+  "concurrency": 8,
+  "maxConcurrency": {
+    "devin": 8,
+    "claude": 8,
+    "codex": 8,
+    "opencode": 8
+  },
+  "permission": "default"
+}

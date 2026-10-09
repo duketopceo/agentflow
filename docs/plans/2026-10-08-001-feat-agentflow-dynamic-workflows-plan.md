@@ -39,9 +39,9 @@ Claude Code's dynamic workflows moved orchestration into code: a script holds th
 
 - R1. `agentflow run <script.mjs>` executes a workflow script with top-level `await`, exposing `agent()`, `parallel()`, `pipeline()`, `phase()`, `log()`, and an `args` global.
 - R2. Each `agent()` call spawns one one-shot session of the configured harness CLI as a subprocess and resolves to that agent's final result, or `null` on unrecoverable failure — matching Claude's `agent()` semantics.
-- R3. Agent calls run under a bounded concurrency pool (default 8, configurable via flag and `agentflow.json`), with calls beyond the limit queued.
-- R4. `agent()` options accepted per call: `{ label, model, schema, worktree, cwd, timeout }`; unknown options warn rather than fail.
-- R5. A journal at `.agentflow/runs/<run-id>.jsonl` records every settled `agent()` call; `agentflow run --resume <run-id>` replays settled results and re-executes unsettled ones. On interrupt (SIGINT/SIGTERM), the runner stops dequeuing new calls, lets in-flight agents finish or kills them after a grace period, journals settled results, and exits leaving the run resumable.
+- R3. Agent calls run under a bounded concurrency pool (default 8, configurable via flag and `agentflow.json`), with calls beyond the limit queued. `agentflow.json` supports a per-harness `maxConcurrency` override (conservative defaults — e.g., 4 for `devin`) since account-level parallel-session limits are unverified.
+- R4. `agent()` options accepted per call: `{ label, model, schema, worktree, cwd, timeout, permission, sandbox }`; unknown options warn rather than fail.
+- R5. A journal at `.agentflow/runs/<run-id>.jsonl` records every settled `agent()` call including a hash of the call spec (prompt + options); `agentflow run --resume <run-id>` replays settled results only when the incoming call's spec hash matches, warning and re-executing on mismatch. On interrupt (SIGINT/SIGTERM), the runner stops dequeuing new calls, lets in-flight agents finish or kills them after a grace period, journals settled results, and exits leaving the run resumable.
 - R6. When `schema` is passed, the runner returns parsed JSON for that agent: native structured-output flags where the harness has them, prompt-level instruction plus JSON extraction where it does not, `null` when parsing fails.
 
 **Harness adapters**
@@ -49,13 +49,13 @@ Claude Code's dynamic workflows moved orchestration into code: a script holds th
 - R7. One adapter per harness — `devin`, `claude`, `codex`, `opencode` — mapping the generic spawn spec to that CLI's flags per the capability matrix in Sources & Research, plus an `echo` adapter that returns a canned response for tests.
 - R8. Harness selection is per-run (`--harness` flag, config default `devin`); a script may not mix harnesses in v1.
 - R9. Each adapter defaults to that harness's least-privileged unattended mode (per KTD7); escalation is an explicit per-call or per-run option.
-- R10. `agentflow doctor` reports which harness CLIs are on PATH and verifies the flags the adapter relies on exist (`--version`/help probes), exiting non-zero on failure.
+- R10. `agentflow doctor` reports which harness CLIs are on PATH and verifies the flags the adapter relies on exist (`--version`/help probes), reports the running Node version against the `engines.node >= 20` requirement, and exits non-zero on failure.
 
 **Distribution**
 
 - R11. The repo installs as a plugin in each target harness: Agent Plugins root `plugin.json` + `.devin-plugin/` for Devin, `.claude-plugin/` for Claude, `.codex-plugin/` for Codex, `.opencode/` for OpenCode.
 - R12. A `skills/agentflow/SKILL.md` teaches every harness the trigger conditions (fan-out beyond a handful of agents, codified rerunnable orchestration, adversarial/verification passes), the script API, cost guidance, and how to run/resume.
-- R13. `examples/` contains runnable workflow scripts (parallel audit, multi-angle research) that run against the `echo` adapter with no model spend.
+- R13. `examples/` contains runnable workflow scripts (parallel audit, multi-angle research) that run against the `echo` adapter with no model spend, plus one opt-in live smoke example guarded behind an explicit flag.
 
 ### Scope Boundaries
 
@@ -91,8 +91,8 @@ Claude Code's dynamic workflows moved orchestration into code: a script holds th
 - KTD3. **Zero-dependency Node.js, single CLI entry.** Plain `node` ESM, no npm packages: `bin/agentflow` → `src/*.mjs`. Node is present wherever these harnesses run; the workflow scripts are JavaScript by definition (KTD2), so a JS host avoids an embedded engine. Rejected: Python (would need a JS engine to host the scripts), Bun (not universally installed; CE-plugin parity is nice-to-have, not load-bearing).
 - KTD4. **Adapter contract: `spawnAgent(spec) → Promise<{text, json?, exitCode, stderrTail}>`.** Spec fields map to the per-harness matrix below; each adapter owns flag mapping and output parsing (stdout text; harness-native JSON where available — `codex --output-schema`, `claude --json-schema`, `opencode --format json`; Devin falls back to prompt-instructed JSON extraction).
 - KTD5. **One repo, multi-manifest packaging.** Root `plugin.json` (Agent Plugins 1.0.0 — Devin loads this spec natively), plus `.devin-plugin/plugin.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.opencode/` following the compound-engineering repo's proven layout. No converter build step in v1 — the per-harness manifests are thin enough to author directly. Rejected: depending on the CE converter CLI (extra build tooling for four small JSON files).
-- KTD6. **Journal-based resume.** Append-only JSONL per run keyed by call sequence index; `--resume` returns journaled results without respawning. Deterministic replay is a script-authoring discipline (documented: avoid `Date.now()`/`Math.random()` in call ordering — same constraint Claude imposes), not enforced by the runtime in v1.
-- KTD7. **Least-privilege default per harness.** Devin: `--permission-mode smart` (auto-approves judged-safe, prompts never reach a headless run — denial is surfaced as failure); Codex: `-s workspace-write`; OpenCode: no `--auto` unless the script author sets it; Claude: `--allowedTools` restricted to read-only set by default. Escalation (`--permission-mode dangerous`, `danger-full-access`, `--auto`, broad tools) is an explicit `agent()` or run-level option the operator opts into.
+- KTD6. **Journal-based resume.** Append-only JSONL per run keyed by call sequence index; each entry also records a hash of the call spec (prompt + options). `--resume` replays a journaled result only when the incoming call's spec hash matches; on mismatch the runner warns on stderr and re-executes that call rather than replaying a stale result. Deterministic call ordering remains a script-authoring discipline (documented: avoid `Date.now()`/`Math.random()` in call ordering — same constraint Claude imposes) — the hash check detects drift rather than silently replaying wrong results.
+- KTD7. **Least-privilege default per harness.** Devin: `--permission-mode smart` (auto-approves judged-safe, prompts never reach a headless run — denial is surfaced as failure); Codex: `-s workspace-write`; OpenCode: no `--auto` unless the script author sets it; Claude: `--allowedTools` restricted to read-only set by default. Escalation (`--permission-mode dangerous`, `danger-full-access`, `--auto`, broad tools) is an explicit `agent()` option — but clamped by a run-level permission ceiling (`--permission` flag on `agentflow run`, configurable in `agentflow.json`, default `smart`/least-privilege): a script requesting `escalated` above the run ceiling warns and is clamped, so the operator's opt-in is real rather than delegated to the script author. Trust boundary: the runner executes workflow scripts with the operator's full ambient privileges — `AsyncFunction`/`node:vm` is an execution convenience, not a security boundary — and the read-before-run rule applies equally to agent-generated scripts that may embed untrusted input (repo files, web content, or prior agents' result text).
 - KTD8. **The skill is the trigger, the runner is the engine.** Capabilities (pooling, journaling, schema extraction, worktrees) live in `agentflow`; the SKILL.md carries the judgment — when fan-out beats `run_subagent`-style delegation, how to write the script, cost guidance (cheap models for mechanical extraction, expensive for judgment — matching the user's spend ceiling). This mirrors the division Claude uses (`ultracode` intent → Workflow tool execution).
 
 ### High-Level Technical Design
@@ -145,10 +145,12 @@ agentflow/
 ├── .opencode/INSTALL.md         # opencode setup notes (no manifest format needed for skills)
 ├── bin/agentflow                # node shebang wrapper → src/cli.mjs
 ├── src/
-│   ├── cli.mjs                  # run / resume / list / doctor commands
+│   ├── cli.mjs                  # run / list / doctor commands
 │   ├── runtime.mjs              # script eval + injected globals + args
 │   ├── pool.mjs                 # concurrency semaphore + queue
 │   ├── journal.mjs              # append-only run journal + replay
+│   ├── schema.mjs               # schema → prompt instruction + extractor
+│   ├── worktree.mjs             # git worktree lifecycle + cleanup
 │   └── adapters/
 │       ├── base.mjs             # spawnAgent contract, shared spawn helper
 │       ├── echo.mjs             # test adapter (no model spend)
@@ -157,15 +159,18 @@ agentflow/
 │       ├── codex.mjs
 │       └── opencode.mjs
 ├── skills/agentflow/SKILL.md    # trigger conditions + API + cost guidance
-├── agents/worker.md             # optional Devin custom subagent (cheap model pin)
 ├── examples/
 │   ├── parallel-audit.mjs
-│   └── multi-angle-research.mjs
+│   ├── multi-angle-research.mjs
+│   └── devin-smoke.mjs          # opt-in live run (--harness devin --live)
 ├── tests/
 │   ├── pool.test.mjs
 │   ├── journal.test.mjs
 │   ├── adapters.test.mjs        # argv construction per harness, fixture JSONL parsing
-│   └── runtime.test.mjs         # end-to-end via echo adapter
+│   ├── runtime.test.mjs         # end-to-end via echo adapter
+│   ├── schema.test.mjs
+│   ├── worktree.test.mjs
+│   └── fixtures/                # recorded harness JSON/JSONL outputs
 ├── agentflow.example.json       # config schema reference
 ├── package.json                 # type:module, bin, engines node>=20
 └── README.md
@@ -188,7 +193,7 @@ agentflow/
 - created via `~/bin/gh-new-repo agentflow --private -d "Cross-harness dynamic workflows: script-driven multi-agent orchestration for devin, claude, codex, opencode"`
 - `package.json`, `.gitignore` (includes `.agentflow/` — run journals carry prompt and result text), `LICENSE` (MIT, matching CE convention), `README.md` skeleton, `docs/plans/` copy of this plan
 
-**Approach:** run `gh-new-repo` from a fresh dir; the script applies branch protection, squash-only, fork-PR approval. Commit scaffold on a feature branch (repo protection requires PR flow anyway — but `main` is fresh; first commit to `main` locally then push is acceptable for repo bootstrap, subsequent work on branches).
+**Approach:** run `gh-new-repo` from a fresh dir; the script applies branch protection, squash-only, fork-PR approval. Land the scaffold via the repo's normal PR flow; if `main` has no commits yet for a PR base, create the initial commit through GitHub/`gh` rather than a direct local push.
 
 **Test expectation:** none — scaffolding.
 
@@ -204,14 +209,14 @@ agentflow/
 
 **Files:**
 
-- `src/cli.mjs` — arg parsing (`run`, `resume`, `list`, `doctor` subcommands; `--harness`, `--concurrency`, `--dir`, `--run-id` flags)
+- `src/cli.mjs` — arg parsing (`run`, `list`, `doctor` subcommands; `--harness`, `--concurrency`, `--dir`, `--run-id`, `--resume <run-id>`, `--permission`, `--live` flags)
 - `src/runtime.mjs` — reads script, wraps in async function with injected scope (`agent`, `parallel`, `pipeline`, `phase`, `log`, `args`), executes
 - `src/pool.mjs` — promise-pool semaphore, FIFO queue, per-call timeout
 - `src/journal.mjs` — JSONL append, keyed by call index; `resolveReplay()` returns settled results on resume
 - `bin/agentflow` — `#!/usr/bin/env node` entry
 - `tests/pool.test.mjs`, `tests/journal.test.mjs`, `tests/runtime.test.mjs`
 
-**Approach:** inject globals by wrapping the script source in an async function context (`AsyncFunction` or `node:vm`) — no bundler needed. Because `export` is illegal inside a wrapped body, the runtime first statically extracts the `export const meta = {...}` literal (the same plain-object-literal constraint Claude documents) and strips it from the evaluated source, using `meta` for `list`/resume display. `agent()` enqueues onto the pool, calls the resolved adapter, returns `{text, json}` or `null`. `parallel()`/`pipeline()` are thin helpers over `Promise.all` with per-item `null` preservation (mirroring documented Claude semantics). Journal index = monotonic call counter per run; resume compares call sequence. Progress output — the no-TUI equivalent of Claude's `/workflows` view — is a human-readable stderr stream: `phase()`/`log()` lines plus one line per agent settle (`label`, ok/null, elapsed, model). Interrupt behavior per R5.
+**Approach:** inject globals by wrapping the script source in an async function context (`AsyncFunction` or `node:vm`) — no bundler needed. Because `export` is illegal inside a wrapped body, the runtime first statically extracts the `export const meta = {...}` literal (the same plain-object-literal constraint Claude documents) and strips it from the evaluated source, using `meta` for `list`/resume display. Static `import` is likewise illegal inside the wrapped body and unsupported in v1 — scripts needing a module use `await import()`; SKILL.md documents this. `agent()` enqueues onto the pool, calls the resolved adapter, returns `{text, json}` or `null`. `parallel()`/`pipeline()` are thin helpers over `Promise.all` with per-item `null` preservation (mirroring documented Claude semantics). Journal index = monotonic call counter per run; resume compares call sequence and replays only on spec-hash match per KTD6. Progress output — the no-TUI equivalent of Claude's `/workflows` view — is a human-readable stderr stream: `phase()`/`log()` lines plus one line per agent settle (`label`, ok/null, elapsed, model). Interrupt behavior per R5.
 
 **Test scenarios:**
 
@@ -228,7 +233,7 @@ agentflow/
 
 **Goal:** the spawn spec → CLI argv mapping is defined once and implemented for the primary harness.
 
-**Requirements:** R2, R4, R7 (devin + echo), R8, R9.
+**Requirements:** R2, R4, R7 (devin + echo), R8, R9, R10.
 
 **Dependencies:** U2.
 
@@ -236,10 +241,10 @@ agentflow/
 
 - `src/adapters/base.mjs` — `spawnAgent(spec)` contract, shared `spawn` wrapper (capture stdout/stderr, timeout kill, cwd handling), plus the `probe()` contract each adapter implements for `doctor` (R10: binary present + required flags verified)
 - `src/adapters/echo.mjs` — deterministic canned response, records spec for assertions
-- `src/adapters/devin.mjs` — argv: `devin -p --respect-workspace-trust false --permission-mode <mapped> [--model X] [--sandbox] [--export <at>]` in spec cwd/worktree; parse stdout as text result
+- `src/adapters/devin.mjs` — argv: `devin -p --respect-workspace-trust false --permission-mode <mapped> [--model X] [--sandbox]` in spec cwd/worktree; parse stdout as text result
 - `tests/adapters.test.mjs` (devin + echo cases)
 
-**Approach:** spec fields: `{prompt, label, model, schema, worktree, cwd, timeout, permission}`. Devin mapping: `schema` → appended instruction "Respond with only JSON matching: <schema>" then JSON-extract from stdout; `worktree` → runner-managed `git worktree add` (U5 wires the flag through; this unit defines the adapter hook). Permission mapping per KTD7: default `smart`, `escalated` → `dangerous`.
+**Approach:** spec fields: `{prompt, label, model, schema, worktree, cwd, timeout, permission, sandbox}`. Devin mapping: `schema` → appended instruction "Respond with only JSON matching: <schema>" then JSON-extract from stdout; `worktree` → runner-managed `git worktree add` (U5 wires the flag through; this unit defines the adapter hook); `sandbox` → `--sandbox`. Permission mapping per KTD7: default `smart`, `escalated` → `dangerous`, clamped to the run-level ceiling. Adapters surface permission-denial and rate-limit failures distinctly in `stderrTail`.
 
 **Test scenarios:**
 
@@ -255,7 +260,7 @@ agentflow/
 
 **Goal:** all four named harnesses run through the same contract.
 
-**Requirements:** R7, R8, R9.
+**Requirements:** R7, R8, R9, R10.
 
 **Dependencies:** U3.
 
@@ -291,7 +296,7 @@ agentflow/
 - adapter edits: codex uses native `--worktree`; others use runner-managed worktree as spec `cwd`
 - `tests/schema.test.mjs`, `tests/worktree.test.mjs`
 
-**Approach:** native schema where supported (claude `--json-schema`, codex `--output-schema`); otherwise instruction + extraction. Worktree: runner creates `.agentflow/wt/<agent-idx>` worktrees, passes as `cwd`, removes on settle. Only inside git repos — outside, option warns and falls back to `cwd`.
+**Approach:** native schema where supported (claude `--json-schema`, codex `--output-schema`); otherwise instruction + extraction. Worktree: runner creates `.agentflow/wt/<run-id>/<agent-idx>` worktrees from HEAD (uncommitted changes are not visible to worktree agents — documented limitation), passes as `cwd`, removes with `git worktree remove --force` on settle — worktree edits are scratch-only isolation and are discarded, never merged back. Leftover worktrees from killed runs are pruned on runner start. Only inside git repos — outside, option warns and falls back to `cwd`.
 
 **Test scenarios:**
 
@@ -311,17 +316,15 @@ agentflow/
 
 **Files:**
 
-- `skills/agentflow/SKILL.md` — frontmatter (`name`, `description` with trigger phrases), when-to-use (vs turn-by-turn subagents), the global contract, a minimal complete script example, permission/cost guidance, resume instructions
+- `skills/agentflow/SKILL.md` — frontmatter (`name`, `description` with trigger phrases), when-to-use (vs turn-by-turn subagents), the global contract, a minimal complete script example, permission/cost guidance, resume instructions, and how each harness session resolves the `agentflow` executable (plugin-relative path vs PATH)
 - `plugin.json`, `.devin-plugin/plugin.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.opencode/INSTALL.md`
-- `agents/worker.md` — Devin custom subagent profile with `model:` pinned to a cheap tier for extraction-class work
-- `README.md` — install per harness (`devin plugins install --local`, Claude plugin dir conventions, codex/opencode equivalents), quickstart
+- `README.md` — install per harness (`devin plugins install --local`, Claude plugin dir conventions, codex/opencode equivalents), quickstart, Node >= 20 prerequisite
 
-**Approach:** manifests follow the verified formats (Devin loads `.devin-plugin` > `.claude-plugin` > root agent-plugins `plugin.json`; CE repo is the layout precedent). Skill is harness-agnostic except a per-harness adapter table; Claude section notes native Workflow as preferred inside Claude sessions. The skill also carries two safety teachings: a workflow script is arbitrary code that spawns credentialed agents — never run one you haven't read — and each `agent()` is a full CLI session with real startup cost, so fan-out granularity should be meaningful work, not micro-tasks.
+**Approach:** manifests follow the verified formats (Devin loads `.devin-plugin` > `.claude-plugin` > root agent-plugins `plugin.json`; CE repo is the layout precedent). Skill is harness-agnostic except a per-harness adapter table; Claude section notes native Workflow as preferred inside Claude sessions. The skill also carries three safety teachings: a workflow script is arbitrary code that spawns credentialed agents — never run one you haven't read, and treat agent-generated scripts that embed untrusted input (repo files, web content, prior agents' output) the same way; each `agent()` is a full CLI session with real startup cost, so fan-out granularity should be meaningful work, not micro-tasks; and journals under `.agentflow/runs/` persist prompt+result text indefinitely (may contain agent-emitted secrets — clean up old runs).
 
 **Test scenarios:**
 
 - `devin plugins install --local <repo>` → `devin plugins info agentflow` lists the skill.
-- `devin doctor` clean with `agents/worker.md` present.
 - Manifest JSON validity; `skills` field resolves.
 
 **Verification:** `devin plugins install --local` + `devin skills list` shows `agentflow:*`.
@@ -341,7 +344,7 @@ agentflow/
 - `examples/devin-smoke.mjs` — 2 real `devin -p` agents (cheap model, read-only task) guarded behind `--harness devin --live`
 - `agentflow.example.json`
 
-**Approach:** examples double as the e2e story; the live smoke is opt-in (model spend) and documented as such in README.
+**Approach:** examples double as the e2e story; the live smoke is opt-in (model spend) and documented as such in README. Also add a manual acceptance step: with the plugin installed, hand a fresh non-Claude harness session a task that warrants fan-out and observe whether the model reaches for the skill and produces a script that runs to completion without correction; record failures as SKILL.md tuning input (the product's primary journey — agent authors a working script from SKILL.md alone — is otherwise untested).
 
 **Test scenarios:**
 
@@ -360,13 +363,14 @@ agentflow/
 | CLI e2e (no spend) | `bin/agentflow run examples/parallel-audit.mjs --harness echo` | U2–U5 |
 | Doctor | `bin/agentflow doctor` exits 0 on this machine | U3, U4 |
 | Plugin install | `devin plugins install --local .` + `devin skills list` shows skill | U6 |
+| Per-harness acceptance (manual) | for each of claude, codex, opencode: perform the documented install path, confirm the skill surface is visible, and run one real cheap `agent()` call through that adapter | U4, U6 |
 | Live smoke (manual, ~small spend) | `agentflow run examples/devin-smoke.mjs --harness devin` | U7 |
 
 ## Definition of Done
 
 - All `node --test` suites pass; echo-adapter e2e green.
 - `doctor` verifies devin/claude/codex/opencode flags on this machine.
-- Plugin installs into Devin with skill visible; manifests for all four harnesses committed.
+- Plugin installs into Devin with skill visible; manifests for all four harnesses committed; per-harness acceptance gate run for claude, codex, and opencode (install surface visible + one real adapter call each).
 - Journal resume demonstrated in tests and docs.
 - No abandoned-attempt code, dead files, or TODO stubs in the diff.
 - PR open with verification evidence in the body.
@@ -393,6 +397,10 @@ Deferred to implementation, non-blocking:
 - Whether OpenCode's `--attach` server mode is a better spawn path than per-call `run` — evaluate during U4; contract unchanged either way.
 - Whether a `devin --cloud -p` adapter variant is worth a v2 (cloud agents as workflow workers).
 - OpenCode's skill-discovery convention on this version (`.opencode/` layout evolved across releases) — verify the installed surface during U6; manifests ship regardless.
+- Per-account concurrent-session limits for each harness (`devin -p` especially) — tune `maxConcurrency` defaults once observed; `doctor` may probe a second concurrent session in a later pass.
+- Concrete 'cheap' vs 'judgment' model identifiers per harness for SKILL.md cost guidance.
+- The fan-out break-even point where subprocess orchestration beats turn-by-turn subagents on wall-clock and spend — measure during U7 dogfooding to make SKILL.md granularity guidance concrete.
+- Whether `--resume` should hash the script file itself in addition to per-call spec hashes — full-script drift detection beyond per-call matching is a v2 consideration.
 
 ---
 

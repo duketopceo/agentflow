@@ -1,0 +1,3 @@
+{"type":"step_start","timestamp":1,"part":{"type":"step-start","snapshot":"x"}}
+{"type":"text","timestamp":2,"part":{"type":"text","text":"audit complete"}}
+{"type":"step_finish","timestamp":3,"part":{"type":"step-finish","tokens":{"total":99}}}

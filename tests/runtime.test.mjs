@@ -184,6 +184,25 @@ test('resume with unknown run-id fails cleanly', async () => {
   } finally { f.cleanup(); }
 });
 
+test('meta extraction: nested braces, braces in strings, unterminated fails clean', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`export const meta = { name: 'n{a}b', nested: { deep: { x: 1 } }, list: [1,2] };
+log('RESULT:' + JSON.stringify(meta));`);
+    const res = await f.run();
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), { name: 'n{a}b', nested: { deep: { x: 1 } }, list: [1, 2] });
+  } finally { f.cleanup(); }
+
+  const g = fixture();
+  try {
+    g.writeScript('export const meta = { name: "x" ;\nawait agent("x");');
+    const res = await g.run();
+    assert.equal(res.code, 1);
+    assert.ok(g.lines.some((l) => l.includes('meta')));
+  } finally { g.cleanup(); }
+});
+
 test('missing binary returns null with error, not a crash', async () => {
   const fake = {
     name: 'fake', bin: 'agentflow-no-such-bin-xyz',

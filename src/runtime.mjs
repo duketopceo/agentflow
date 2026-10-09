@@ -102,35 +102,43 @@ export async function runScript(opts) {
     }
 
     const started = Date.now();
+    // Journaling lives inside the task so inFlight.empty => durable record.
+    // Returns {cancelled:true} when the call never genuinely ran: drained
+    // queue, aborted spawn, or a failure caused by our own abort. Cancelled
+    // calls are not journaled — resume must re-execute them.
     const settled = await pool.run(async () => {
-      if (abort.signal.aborted) return null;
+      if (abort.signal.aborted) return { cancelled: true };
       inFlight.add(spec);
       try {
-        return await adapter.spawnAgent({ ...spec, signal: abort.signal, cwd: spec.cwd ?? cwd });
+        const s = await adapter.spawnAgent({ ...spec, signal: abort.signal, cwd: spec.cwd ?? cwd });
+        if (abort.signal.aborted && !s?.ok) return { cancelled: true };
+        const secs = ((Date.now() - started) / 1000).toFixed(1);
+        if (s.ok) {
+          journal.append({ type: 'agent', i, label: spec.label, ok: true, result: s.result, model: spec.model ?? null, elapsed: secs, at: new Date().toISOString() });
+          return { ok: true, result: s.result, elapsed: secs };
+        }
+        journal.append({ type: 'agent', i, label: spec.label, ok: false, error: s.error, model: spec.model ?? null, elapsed: secs, at: new Date().toISOString() });
+        return { ok: false, error: s.error, elapsed: secs };
+      } catch (e) {
+        const secs = ((Date.now() - started) / 1000).toFixed(1);
+        const error = { message: String(e?.message ?? e), permissionDenied: false };
+        journal.append({ type: 'agent', i, label: spec.label, ok: false, error, model: spec.model ?? null, elapsed: secs, at: new Date().toISOString() });
+        return { ok: false, error, elapsed: secs };
       } finally {
         inFlight.delete(spec);
       }
     });
 
-    // null with no record = cancelled before spawn (drained). Not journaled —
-    // resume must re-execute this call.
-    if (settled == null || settled.__agentflowError) {
+    if (settled == null || settled.__agentflowError || settled.cancelled) {
       const e = settled?.__agentflowError;
-      const error = e
-        ? { message: String(e.message ?? e), permissionDenied: false }
-        : { message: 'cancelled', permissionDenied: false };
-      if (e) journal.append({ type: 'agent', i, label: spec.label, ok: false, error, at: new Date().toISOString() });
-      logLine(`${spec.label} -> null (${error.message.slice(0, 120)})`);
+      logLine(`${spec.label} -> null (${e ? String(e.message ?? e).slice(0, 120) : 'cancelled'})`);
       return null;
     }
 
-    const secs = ((Date.now() - started) / 1000).toFixed(1);
     if (settled.ok) {
-      journal.append({ type: 'agent', i, label: spec.label, ok: true, result: settled.result, model: spec.model ?? null, elapsed: secs, at: new Date().toISOString() });
-      logLine(`${spec.label} -> ok (${secs}s${spec.model ? `, ${spec.model}` : ''})`);
+      logLine(`${spec.label} -> ok (${settled.elapsed}s${spec.model ? `, ${spec.model}` : ''})`);
       return settled.result;
     }
-    journal.append({ type: 'agent', i, label: spec.label, ok: false, error: settled.error, model: spec.model ?? null, elapsed: secs, at: new Date().toISOString() });
     const kind = settled.error?.permissionDenied ? 'permission-denied' : settled.error?.timedOut ? 'timeout' : 'error';
     logLine(`${spec.label} -> null (${kind}: ${String(settled.error?.message ?? '').slice(0, 120)})`);
     return null;

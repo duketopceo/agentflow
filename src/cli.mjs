@@ -60,7 +60,7 @@ export async function main(argv = process.argv.slice(2)) {
     const { code, runId } = await runScript({
       scriptPath: resolve(cwd, script),
       adapter,
-      concurrency: Number(flags.concurrency ?? config.concurrency ?? 8),
+      concurrency: Number(flags.concurrency ?? config.concurrency) || 8,
       cwd,
       args: flags.scriptArgs ?? [],
       resumeId: flags.resume ?? null,

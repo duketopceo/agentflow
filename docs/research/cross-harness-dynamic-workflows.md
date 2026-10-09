@@ -70,17 +70,29 @@ Ori is OpenRouter's agent launcher + native coding agent, installed here.
   `--reasoning-effort`, `--resume/--session`. Approval surface is binary:
   `manual` returns agent questions to the caller (stalls headless), so the
   adapter maps both postures to `self-drive`. → `--harness ori` adapter.
-- **`ori <harness>`** — launches claude/codex/opencode/grok/kilo/hermes/
-  cline/pi/muse/omp/prime-agent with OpenRouter env injected; remaining args
-  pass through untouched. Ori subcommand names equal binary names, so the
-  wrap is a literal `['ori', ...argv]` prepend — implemented as spec `via:
-  'ori'` / CLI `--via ori`. Workers keep their harness's flags and output
-  parsing while credentials + models route through OpenRouter. This is the
-  cheap-model lever: a workflow can run claude-harness workers on
-  `x-ai/grok-4-fast` or `deepseek/*` without touching Anthropic billing.
+- **`ori <harness>`** — launches the real CLI with OpenRouter env injected;
+  remaining args pass through untouched. Verified via `ori harness list`
+  (12 launchable kinds): claude, codex, grok, opencode, hermes, omp,
+  prime-agent, kilo, cline, pi, muse, dsh — `dsh` configures DeepSeek
+  Harness rather than launching it, so it is excluded from `via`.
+  Ori subcommand names equal binary names, so the wrap is a literal
+  `['ori', ...argv]` prepend — implemented as spec `via: 'ori'` /
+  CLI `--via ori`. In wrapper mode Ori **consumes `--model` and
+  `--reasoning-effort` itself** and translates them to the harness's
+  native mechanism — so `model:` values under `--via ori` are OpenRouter
+  slugs regardless of which harness runs the worker, and
+  `reasoningEffort:` works cross-harness. Workers keep their harness's
+  flags and output parsing while credentials + models route through
+  OpenRouter. This is the cheap-model lever: a workflow can run
+  claude-harness workers on `x-ai/grok-4-fast` or `deepseek/*` without
+  touching Anthropic billing.
   Caveat: recent Ori versions prompt to confirm a project-discovered key
   before first spend — headless callers must pre-approve (`ori auth` /
   `ori login --with-key` or `OPENROUTER_API_KEY`).
+- **Adjacent Ori tools** (not adapters, noted for the roadmap): `ori eval`
+  runs `*.eval.ts` model comparisons natively (overlaps "same task across
+  models" workflows); `ori Intern`/`Desktop` are waitlisted Slack/menu-bar
+  surfaces; `ori harness test` runs harness contract cases.
 
 "One plugin for them all" is literally true only on devin (`optionalPlugins`
 pulls the CE suite alongside). Elsewhere it's one repo, one install per

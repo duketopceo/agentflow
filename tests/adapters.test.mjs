@@ -113,6 +113,15 @@ test('applyVia wraps wrappable harnesses, rejects others, direct is noop', () =>
   assert.ok(applyVia(devin, devin.buildArgv(spec()), spec({ via: 'ori' })).error);
   assert.deepEqual(applyVia(claude, argv, spec({ via: 'direct' })).argv[0], 'claude');
   assert.deepEqual(applyVia(claude, argv, spec()).argv[0], 'claude');
+  // already-on-ori adapter is a noop, not a double-wrap
+  assert.deepEqual(applyVia(ori, ori.buildArgv(spec()), spec({ via: 'ori' })).argv.slice(0, 2), ['ori', 'code']);
+  // reasoningEffort injects into the ori-consumed position after the harness name
+  const w = applyVia(claude, argv, spec({ via: 'ori', reasoningEffort: 'high' })).argv;
+  assert.deepEqual(w.slice(0, 4), ['ori', 'claude', '--reasoning-effort', 'high']);
+});
+
+test('ori reasoningEffort emits native flag', () => {
+  assert.ok(ori.buildArgv(spec({ reasoningEffort: 'low' })).includes('low'));
 });
 
 test('adapter registry exposes all six harnesses', () => {

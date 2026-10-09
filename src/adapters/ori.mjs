@@ -2,7 +2,8 @@ import { spawnAgent as run, extractJson, probeBinary, withSchemaPrompt } from '.
 
 // Verified against `ori code --help` (OpenRouter's native agent):
 //   -p/--prompt, --model <openrouter-slug>, --output text|jsonl,
-//   --approvals self-drive|manual, --reasoning-effort, --resume/--session.
+//   --approvals self-drive|manual, --reasoning-effort max|xhigh|high|medium|
+//   low|minimal|none, --resume/--session.
 // ori's approval surface is binary: 'manual' in headless returns agent
 // questions to the caller (everything stalls), so both postures map to
 // 'self-drive'. Ori's own runtime applies the OpenRouter credential.
@@ -20,6 +21,7 @@ export default {
   buildArgv(spec) {
     const argv = [this.bin, 'code', '--prompt', spec.prompt, '--output', 'text', '--approvals', 'self-drive'];
     if (spec.model) argv.push('--model', spec.model); // OpenRouter slug, e.g. deepseek/deepseek-v3.2
+    if (spec.reasoningEffort) argv.push('--reasoning-effort', spec.reasoningEffort);
     return argv;
   },
 

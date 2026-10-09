@@ -91,11 +91,15 @@ export function classifyFailure(r, patterns = []) {
 const ORI_WRAPPED = new Set(['claude', 'codex', 'opencode', 'grok', 'kilo', 'hermes', 'cline', 'pi', 'muse', 'omp', 'prime-agent']);
 
 // `via: 'ori'` prepends `ori` to the harness argv (ori <name> injects
-// OpenRouter env and passes the rest through). Pure for testability.
+// OpenRouter env and passes the rest through). Ori consumes --model and
+// --reasoning-effort itself in wrapper mode; --reasoning-effort is injected
+// right after the harness name so ori translates it natively. Pure for tests.
 export function applyVia(adapter, argv, spec) {
-  if (spec.via !== 'ori') return { argv };
+  if (spec.via !== 'ori' || adapter.bin === 'ori') return { argv };
   if (!ORI_WRAPPED.has(adapter.bin)) return { error: `--via ori: no 'ori ${adapter.bin}' launcher` };
-  return { argv: ['ori', ...argv] };
+  const wrapped = ['ori', ...argv];
+  if (spec.reasoningEffort) wrapped.splice(2, 0, '--reasoning-effort', spec.reasoningEffort);
+  return { argv: wrapped };
 }
 
 // Generic spawnAgent given an adapter's buildArgv/parse/permissionDeniedPatterns.

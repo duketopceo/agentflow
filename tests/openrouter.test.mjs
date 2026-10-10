@@ -60,3 +60,20 @@ test('openrouter: non-TimeoutError rejection is a plain error', async () => {
   assert.equal(r.error.timedOut, false);
   assert.match(r.error.message, /ECONNRESET/);
 });
+
+test('openrouter: request construction reaches fetch — method, signal, schema body', async () => {
+  let seen;
+  const r = await openrouter.spawnAgent(spec({
+    schema: { type: 'object' },
+    fetchImpl: async (url, init) => { seen = init; return okResponse({ choices: [{ message: { content: '{"ok":true}' } }] }); },
+  }));
+  assert.equal(r.ok, true);
+  // Response mocks that discard init can't see a dropped signal or a body
+  // built without the schema prompt — the silent production break this
+  // verifies against.
+  assert.equal(seen.method, 'POST');
+  assert.ok(seen.signal instanceof AbortSignal);
+  assert.equal(seen.signal.aborted, false);
+  const body = JSON.parse(seen.body);
+  assert.match(body.messages[0].content, /JSON object matching this schema/);
+});

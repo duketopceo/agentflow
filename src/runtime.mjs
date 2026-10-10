@@ -4,7 +4,7 @@ import { Pool } from './pool.mjs';
 import { Journal } from './journal.mjs';
 import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
 
-const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries']);
+const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries', 'fetchImpl']);
 const DEFAULT_GRACE_MS = 8000;
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
@@ -67,8 +67,10 @@ export async function runScript(opts) {
     maxAgents = 1000,
     retries = 0,
     err = (s) => process.stderr.write(s + '\n'),
-    // Test seam: injected sleep removes wall-clock backoff/drain waits from
-    // the suite. Production callers leave the default.
+    // Test seam: injected sleep removes wall-clock retry backoff from the
+    // suite. Deliberately NOT used by the signal-drain loop below — a poll's
+    // sleep IS its interval, and an instant injected sleep would spin the
+    // event loop and starve the I/O that clears in-flight work.
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   } = opts;
 
@@ -227,12 +229,12 @@ export async function runScript(opts) {
       pool.drain();
       const deadline = Date.now() + graceMs;
       while (inFlight.size && Date.now() < deadline) {
-        await sleep(50);
+        await new Promise((r) => setTimeout(r, 50));
       }
       if (inFlight.size) {
         logLine(`aborting ${inFlight.size} in-flight agent(s)`);
         abort.abort();
-        await sleep(500);
+        await new Promise((r) => setTimeout(r, 500));
       }
       journal.append({ type: 'run-end', reason: 'interrupted', at: new Date().toISOString() });
       logLine(`run ${runId} interrupted — resume with: agentflow run ${scriptName} --resume ${runId}`);

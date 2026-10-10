@@ -4,4 +4,4 @@ await main(process.argv.slice(2), (argv) => {
   // Final answer goes to the -o file, NOT stdout — mirrors real codex exec.
   writeLastMessage(argv, wantsSchema(argv) ? '{"ok":true}' : 'PONG');
   process.stdout.write('{"type":"item.completed","item":{"type":"agent_message"}}\n');
-});
+}, { denyText: 'Error: sandbox denied filesystem write outside allowed dirs' });

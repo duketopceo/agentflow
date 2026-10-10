@@ -11,7 +11,7 @@
     "doctor": "bin/agentflow doctor"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.3"
   },
   "license": "MIT",
   "private": true,

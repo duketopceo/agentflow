@@ -218,14 +218,25 @@ test('missing binary returns null with error, not a crash', async () => {
 test('SIGINT: queued calls never start, settled journaled, run resumable', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'af-sig-'));
   try {
-    writeFileSync(join(dir, 'w.mjs'), `const r = await parallel([0,1,2,3,4,5].map(i => () => agent('do '+i, {label:'s'+i})));
+    writeFileSync(join(dir, 'w.mjs'), `log('boot');
+const r = await parallel([0,1,2,3,4,5].map(i => () => agent('do '+i, {label:'s'+i})));
 log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
     const bin = join(ROOT, 'bin/agentflow');
-    const env = { ...process.env, AGENTFLOW_ECHO_SLOW: '500' };
+    const env = { ...process.env, AGENTFLOW_ECHO_SLOW: '800' };
     const child = spawn(process.execPath, [bin, 'run', 'w.mjs', '--harness', 'echo', '--concurrency', '2'], { cwd: dir, env });
     let stderr = '';
     child.stderr.on('data', (d) => { stderr += d; });
-    await new Promise((r) => setTimeout(r, 350)); // let 2 start, 4 still queued
+    // Readiness barrier: signal only after the script body starts, or node
+    // boot on a loaded runner can land SIGINT before the handler registers
+    // (flake: exit null) or with zero calls in flight (vacuous green).
+    await new Promise((resolve, reject) => {
+      const deadline = Date.now() + 15000;
+      const iv = setInterval(() => {
+        if (stderr.includes('boot')) { clearInterval(iv); resolve(); }
+        else if (Date.now() > deadline) { clearInterval(iv); reject(new Error('child never reached boot marker')); }
+      }, 20);
+    });
+    await new Promise((r) => setTimeout(r, 100)); // let the 2 pool slots fill
     child.kill('SIGINT');
     const code = await new Promise((r) => child.on('close', r));
     assert.equal(code, 130);
@@ -236,7 +247,8 @@ log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
     assert.equal(loaded.ended.reason, 'interrupted');
     const settledLabels = [...loaded.settled.values()].map((v) => v.label).sort();
     // At most the 2 in-flight slots may settle; queued calls must never start.
-    assert.ok(settledLabels.length <= 2, `expected <=2 settled, got ${settledLabels}`);
+    // >=1 keeps the test non-vacuous: the drain must have journaled real work.
+    assert.ok(settledLabels.length >= 1 && settledLabels.length <= 2, `expected 1-2 settled, got ${settledLabels}`);
     assert.ok(settledLabels.every((l) => l === 's0' || l === 's1'), `settled=${settledLabels}`);
 
     // Resume completes the remaining calls.

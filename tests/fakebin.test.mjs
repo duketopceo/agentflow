@@ -34,6 +34,16 @@ test('fakebin codex: result captured from -o file, not stdout', async () => {
   });
 });
 
+test('fakebin opencode: text assembled from real-shape events, not stdout fallback', async () => {
+  await withFakebin(async () => {
+    const r = await opencode.spawnAgent(spec());
+    assert.equal(r.ok, true);
+    // Exact join of the stub's two text parts — raw-stdout fallback would
+    // return the whole JSONL stream instead.
+    assert.equal(r.result.text, 'first partPONG');
+  });
+});
+
 test('fakebin: schema specs produce parsed json per adapter mechanism', async () => {
   await withFakebin(async () => {
     const s = spec({ schema: { type: 'object' } });
@@ -83,12 +93,22 @@ test('fakebin via-ori: codex wrap routes model through ori, strips -m', async ()
     }, { FAKEBIN_ARGV_FILE: argvFile });
     const seen = readFileSync(argvFile, 'utf8');
     // Regression net for the codex custom-spawnAgent applyVia bypass: the ori
-    // stub must receive `codex --model <slug> exec` with no native -m left.
+    // stub must receive `codex --model <slug> exec` with no native -m left,
+    // and -o must survive the wrap or file capture silently falls to stdout.
     assert.match(seen, /^codex --model x-ai\/grok-4-fast exec/m);
     assert.ok(!seen.includes(' -m '), seen);
+    assert.ok(seen.includes(' -o '), seen);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('fakebin via-ori: codex + schema still captures file json through ori', async () => {
+  await withFakebin(async () => {
+    const r = await codex.spawnAgent(spec({ via: 'ori', schema: { type: 'object' } }));
+    assert.equal(r.ok, true, JSON.stringify(r.error));
+    assert.deepEqual(r.result.json, { ok: true });
+  });
 });
 
 test('fakebin via-ori: devin has no ori launcher — clean error, no spawn', async () => {

@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 import { main, wantsSchema, FENCED } from './lib.mjs';
+// Real event shape (mirrors tests/fixtures/opencode-events.jsonl): text parts
+// carry part.type:'text' interleaved with step/tool lines. A simplified shape
+// would only exercise the adapter's fallback parse branch, not the real one.
 await main(process.argv.slice(2), (argv) => {
   const text = wantsSchema(argv) ? FENCED : 'PONG';
-  process.stdout.write('{"type":"text","part":{"text":"first part"}}\n');
-  process.stdout.write(JSON.stringify({ type: 'text', part: { text } }) + '\n');
-});
+  process.stdout.write('{"type":"step_start","part":{"type":"step-start"}}\n');
+  process.stdout.write('{"type":"text","part":{"type":"text","text":"first part"}}\n');
+  process.stdout.write('{"type":"tool_use","part":{"type":"tool","tool":"read","state":{"status":"completed"}}}\n');
+  process.stdout.write(JSON.stringify({ type: 'text', part: { type: 'text', text } }) + '\n');
+  process.stdout.write('{"type":"step_finish","part":{"type":"step-finish","reason":"stop"}}\n');
+}, { denyText: 'Error: denied by permission configuration' });

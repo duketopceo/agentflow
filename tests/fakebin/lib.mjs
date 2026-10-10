@@ -8,11 +8,14 @@
 //                       file-capture adapters like codex never see stdout)
 import { writeFileSync, appendFileSync } from 'node:fs';
 
-export async function main(argv, emit) {
+export async function main(argv, emit, { denyText = 'Error: approval required to run exec' } = {}) {
   const sleep = Number(process.env.FAKEBIN_SLEEP ?? 0);
   if (sleep) await new Promise((r) => setTimeout(r, sleep));
   if (process.env.FAKEBIN_DENY) {
-    process.stderr.write('Error: approval required to run exec\n');
+    // Each stub passes the denial shape its real harness emits, so the deny
+    // test exercises that adapter's DISTINCTIVE permissionDeniedPatterns —
+    // a single shared line would leave adapter-specific patterns untested.
+    process.stderr.write(denyText + '\n');
     process.exit(1);
   }
   const forced = process.env.FAKEBIN_EXIT;

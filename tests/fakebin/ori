@@ -3,6 +3,8 @@ import { main, wantsSchema, writeLastMessage, FENCED } from './lib.mjs';
 await main(process.argv.slice(2), (argv) => {
   // ori wraps other harnesses: `ori claude -p ...`, `ori codex --model X exec -o F`.
   // Honor -o so wrapped codex's file capture still works; dump argv when asked.
-  writeLastMessage(argv, 'PONG');
-  process.stdout.write((wantsSchema(argv) ? FENCED : 'PONG') + '\n');
-});
+  writeLastMessage(argv, wantsSchema(argv) ? '{"ok":true}' : 'PONG');
+  // Distinct stdout sentinel: if -o is dropped from wrapped argv, codex's
+  // file-read fallback to stdout returns 'ORI:PONG', not 'PONG' — unmasked.
+  process.stdout.write((wantsSchema(argv) ? FENCED : 'ORI:PONG') + '\n');
+}, { denyText: 'Error: manual approval needed for this launcher' });

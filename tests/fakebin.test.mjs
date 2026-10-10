@@ -46,64 +46,47 @@ test('fakebin: schema specs produce parsed json per adapter mechanism', async ()
 });
 
 test('fakebin: forced exit classifies as error, not crash', async () => {
-  process.env.FAKEBIN_EXIT = '1';
-  try {
-    await withFakebin(async () => {
-      const r = await devin.spawnAgent(spec());
-      assert.equal(r.ok, false);
-      assert.match(r.error.message, /exit 1/);
-      assert.equal(r.error.permissionDenied, false);
-    });
-  } finally {
-    delete process.env.FAKEBIN_EXIT;
-  }
+  await withFakebin(async () => {
+    const r = await devin.spawnAgent(spec());
+    assert.equal(r.ok, false);
+    assert.match(r.error.message, /exit 1/);
+    assert.equal(r.error.permissionDenied, false);
+  }, { FAKEBIN_EXIT: '1' });
 });
 
 test('fakebin: denial-shaped stderr maps permissionDenied per adapter', async () => {
-  process.env.FAKEBIN_DENY = '1';
-  try {
-    await withFakebin(async () => {
-      for (const adapter of [devin, claude, codex, opencode, ori]) {
-        const r = await adapter.spawnAgent(spec());
-        assert.equal(r.ok, false, adapter.name);
-        assert.equal(r.error.permissionDenied, true, adapter.name);
-      }
-    });
-  } finally {
-    delete process.env.FAKEBIN_DENY;
-  }
+  await withFakebin(async () => {
+    for (const adapter of [devin, claude, codex, opencode, ori]) {
+      const r = await adapter.spawnAgent(spec());
+      assert.equal(r.ok, false, adapter.name);
+      assert.equal(r.error.permissionDenied, true, adapter.name);
+    }
+  }, { FAKEBIN_DENY: '1' });
 });
 
 test('fakebin: sleep past spec.timeout classifies timedOut', async () => {
-  process.env.FAKEBIN_SLEEP = '5000';
-  try {
-    await withFakebin(async () => {
-      const r = await devin.spawnAgent(spec({ timeout: 50 }));
-      assert.equal(r.ok, false);
-      assert.equal(r.error.timedOut, true);
-    });
-  } finally {
-    delete process.env.FAKEBIN_SLEEP;
-  }
+  await withFakebin(async () => {
+    const r = await devin.spawnAgent(spec({ timeout: 50 }));
+    assert.equal(r.ok, false);
+    assert.equal(r.error.timedOut, true);
+  }, { FAKEBIN_SLEEP: '5000' });
 });
 
 test('fakebin via-ori: codex wrap routes model through ori, strips -m', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'af-via-'));
   try {
     const argvFile = join(dir, 'argv.txt');
-    process.env.FAKEBIN_ARGV_FILE = argvFile;
     await withFakebin(async () => {
       const r = await codex.spawnAgent(spec({ via: 'ori', model: 'x-ai/grok-4-fast' }));
       assert.equal(r.ok, true, JSON.stringify(r.error));
       assert.equal(r.result.text, 'PONG');
-    });
+    }, { FAKEBIN_ARGV_FILE: argvFile });
     const seen = readFileSync(argvFile, 'utf8');
     // Regression net for the codex custom-spawnAgent applyVia bypass: the ori
     // stub must receive `codex --model <slug> exec` with no native -m left.
     assert.match(seen, /^codex --model x-ai\/grok-4-fast exec/m);
     assert.ok(!seen.includes(' -m '), seen);
   } finally {
-    delete process.env.FAKEBIN_ARGV_FILE;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -112,15 +95,13 @@ test('fakebin via-ori: devin has no ori launcher — clean error, no spawn', asy
   const dir = mkdtempSync(join(tmpdir(), 'af-via-'));
   try {
     const argvFile = join(dir, 'argv.txt');
-    process.env.FAKEBIN_ARGV_FILE = argvFile;
     await withFakebin(async () => {
       const r = await devin.spawnAgent(spec({ via: 'ori' }));
       assert.equal(r.ok, false);
       assert.match(r.error.message, /no 'ori devin' launcher/);
-    });
+    }, { FAKEBIN_ARGV_FILE: argvFile });
     assert.throws(() => readFileSync(argvFile, 'utf8'), /ENOENT/); // nothing spawned
   } finally {
-    delete process.env.FAKEBIN_ARGV_FILE;
     rmSync(dir, { recursive: true, force: true });
   }
 });

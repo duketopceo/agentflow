@@ -1,5 +1,9 @@
 # Live adapter smoke matrix — v0.2
 
+Rows below are reproducible: `node scripts/smoke-harnesses.mjs` re-runs the
+same per-adapter invocations (120s timeout) and prints markdown rows;
+`--json` for machines, `--only <csv>` to filter.
+
 Run 2026-10-09 from `/tmp/af-smoke` (isolated scratch dir; journals under
 `.agentflow/`). Invocation: `agentflow run smoke.mjs --harness <h> -- <model>`.
 Cost posture: free/cheap routes only — no Anthropic or premium spend.

@@ -27,7 +27,7 @@ export class Journal {
   }
 
   static load(path) {
-    const meta = { settled: new Map(), ended: null, runStart: null };
+    const meta = { settled: new Map(), ended: null, runStart: null, worktrees: [] };
     if (!existsSync(path)) return meta;
     for (const line of readFileSync(path, 'utf8').split('\n')) {
       if (!line.trim()) continue;
@@ -36,6 +36,7 @@ export class Journal {
       if (rec.type === 'run-start') meta.runStart = rec;
       else if (rec.type === 'agent') meta.settled.set(rec.i, rec);
       else if (rec.type === 'run-end') meta.ended = rec;
+      else if (rec.type === 'worktree') meta.worktrees.push(rec);
     }
     return meta;
   }
@@ -54,6 +55,7 @@ export class Journal {
           harness: rec.runStart?.harness ?? null,
           settled: rec.settled.size,
           ended: rec.ended?.reason ?? 'incomplete',
+          pid: rec.runStart?.pid ?? null,
           at: rec.runStart?.at ?? null,
         };
       });

@@ -50,11 +50,25 @@ public repo. agentflow is not published to npm — the plugin manifests above
 The `agents/worker.md` profile gives Devin a cheap disposable subagent
 (`swe-2-*` free tier or `claude-haiku-5-5-low`) for extraction-class fan-out.
 
+## Ops
+
+```bash
+bin/agentflow run w.mjs --detach   # background; journal keeps the record
+bin/agentflow status <run-id>      # progress; 'orphaned' if the pid died
+bin/agentflow stop <run-id>        # SIGTERM the journaled pid (resumable)
+bin/agentflow clean [--all]        # reclaim worktrees of ended runs
+node scripts/smoke-harnesses.mjs   # reproducible live-adapter matrix
+```
+
+`agent(p, {worktree: 'auto'})` runs the call in its own `git worktree` under
+`.agentflow/worktrees/` — isolates file-mutating agents from the main
+checkout; `clean` reclaims them after the run ends.
+
 ## Docs
 
 - `skills/agentflow/SKILL.md` — agent-facing guidance (installed per harness)
 - `docs/plans/` — design history
-- `docs/smoke-matrix.md` — live per-adapter verification results
+- `docs/smoke-matrix.md` — live per-adapter verification results (`scripts/smoke-harnesses.mjs` reproduces)
 - `docs/research/` — cross-harness landscape + orchestration economics
 
 ## Status

@@ -1,6 +1,6 @@
-import { readFileSync, existsSync, mkdirSync, openSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { readFileSync, existsSync, mkdirSync, openSync, readdirSync, rmSync } from 'node:fs';
+import { resolve, join } from 'node:path';
+import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runScript } from './runtime.mjs';
 import { Journal } from './journal.mjs';
@@ -16,6 +16,9 @@ usage:
                 [-- <script args>...]
   agentflow status <run-id>        progress + outcome from the journal
   agentflow tail <run-id>          stream journal events until run-end
+  agentflow stop <run-id>          SIGTERM the journaled pid, wait for run-end
+  agentflow clean [--all]          remove worktrees of ended runs
+                                   (--all: also sweep unrecorded dirs)
   agentflow doctor
   agentflow list
 
@@ -87,6 +90,8 @@ export async function main(argv = process.argv.slice(2)) {
 
   if (cmd === 'status') return statusCmd(cwd, flags._[0], false);
   if (cmd === 'tail') return statusCmd(cwd, flags._[0], true);
+  if (cmd === 'stop') return stopCmd(cwd, flags._[0]);
+  if (cmd === 'clean') return cleanCmd(cwd, flags);
 
   if (cmd === 'doctor') {
     const probes = await Promise.all(Object.entries(adapters).map(async ([name, adapter]) => [name, await adapter.probe()]));
@@ -104,7 +109,8 @@ export async function main(argv = process.argv.slice(2)) {
     const runs = Journal.list(cwd);
     if (!runs.length) { process.stdout.write('no runs under .agentflow/runs/\n'); return 0; }
     for (const r of runs) {
-      process.stdout.write(`${r.runId}  ${r.script ?? '?'}  harness=${r.harness ?? '?'}  settled=${r.settled}  ${r.ended}\n`);
+      const state = r.ended === 'incomplete' && !pidAlive(r.pid) ? 'orphaned' : r.ended;
+      process.stdout.write(`${r.runId}  ${r.script ?? '?'}  harness=${r.harness ?? '?'}  settled=${r.settled}  ${state}\n`);
     }
     return 0;
   }
@@ -147,8 +153,16 @@ async function statusCmd(cwd, runId, follow) {
     process.stdout.write(`run ${runId}  ${s.script ?? '?'}  harness=${s.harness ?? '?'}  at=${s.at ?? '?'}\n`);
     const cells = [...meta.settled.values()].map((r) => `${r.label}:${r.ok ? 'ok' : 'fail'}`);
     process.stdout.write(`settled=${meta.settled.size}${cells.length ? '  ' + cells.join('  ') : ''}\n`);
-    process.stdout.write(meta.ended ? `ended: ${meta.ended.reason} at ${meta.ended.at}\n` : `running (pid ${s.pid ?? '?'})\n`);
-    return endCode(meta.ended);
+    if (meta.ended) {
+      process.stdout.write(`ended: ${meta.ended.reason} at ${meta.ended.at}\n`);
+      return endCode(meta.ended);
+    }
+    if (!pidAlive(s.pid)) {
+      process.stdout.write(`orphaned (pid ${s.pid ?? '?'} dead — resume: agentflow run ${s.script ?? '<script>'} --resume ${runId})\n`);
+      return 2;
+    }
+    process.stdout.write(`running (pid ${s.pid})\n`);
+    return 2;
   }
 
   const seen = new Set();
@@ -164,6 +178,97 @@ async function statusCmd(cwd, runId, follow) {
       if (!seen.has(rec.i)) { seen.add(rec.i); print(rec); }
     }
     if (meta.ended) { print(meta.ended); return endCode(meta.ended); }
+    if (!pidAlive(meta.runStart?.pid)) {
+      process.stdout.write(`orphaned (pid ${meta.runStart?.pid ?? '?'} dead — resume: agentflow run ${meta.runStart?.script ?? '<script>'} --resume ${runId})\n`);
+      return 2;
+    }
     await new Promise((r) => setTimeout(r, 500));
   }
+}
+
+// A journaled pid is ours to signal only while it is alive AND its start
+// time matches run-start.at — a dead pid is an orphaned run, a mismatched
+// live pid is someone else's process (pid reuse guard, KTD1).
+function pidAlive(pid) {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+
+// Process start time via elapsed seconds (ps -o etimes=); start ≈ now - etimes.
+function procStartMs(pid) {
+  const out = execFileSync('ps', ['-o', 'etimes=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+  const secs = Number(out);
+  if (!Number.isFinite(secs)) throw new Error(`no start time for pid ${pid}`);
+  return Date.now() - secs * 1000;
+}
+
+async function stopCmd(cwd, runId) {
+  if (!runId) { process.stderr.write(USAGE); return 2; }
+  const path = Journal.pathFor(cwd, runId);
+  if (!existsSync(path)) { process.stderr.write(`agentflow: no journal for run '${runId}' under ${Journal.dirFor(cwd)}\n`); return 2; }
+  const meta = Journal.load(path);
+  if (!meta.runStart) { process.stderr.write(`agentflow: no journal for run '${runId}' under ${Journal.dirFor(cwd)}\n`); return 2; }
+  if (meta.ended) { process.stdout.write(`run ${runId} already ended: ${meta.ended.reason}\n`); return 0; }
+
+  const { pid, script } = meta.runStart;
+  if (!pidAlive(pid)) {
+    process.stdout.write(`run ${runId} orphaned (pid ${pid ?? '?'} dead — nothing to stop); resume: agentflow run ${script} --resume ${runId}\n`);
+    return 0;
+  }
+  try {
+    const skew = Math.abs(procStartMs(pid) - Date.parse(meta.runStart.at));
+    if (skew > 5_000) {
+      process.stderr.write(`agentflow: refusing to signal pid ${pid} — started ${(skew / 1000) | 0}s from journal time (pid likely reused)\n`);
+      return 1;
+    }
+  } catch (e) {
+    process.stderr.write(`agentflow: cannot verify pid ${pid} start time (${e.message}); refusing to signal\n`);
+    return 1;
+  }
+
+  process.kill(pid, 'SIGTERM');
+  process.stdout.write(`SIGTERM -> pid ${pid}; waiting for run-end\n`);
+  const deadline = Date.now() + 25_000;
+  while (Date.now() < deadline) {
+    if (Journal.load(path).ended) { process.stdout.write(`run ${runId} ended\n`); return 0; }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  process.stderr.write(`agentflow: run ${runId} did not reach run-end within 25s\n`);
+  return 1;
+}
+
+// agentflow clean: remove journaled worktrees of ENDED runs only (a live
+// run's checkout is never touched, KTD2). --all also sweeps on-disk
+// .agentflow/worktrees/ dirs with no journal record.
+function cleanCmd(cwd, flags) {
+  const wtRoot = join(cwd, '.agentflow', 'worktrees');
+  const journaled = new Set();
+  let removed = 0;
+  const drop = (p) => {
+    try { execFileSync('git', ['-C', cwd, 'worktree', 'remove', '--force', p], { stdio: 'pipe' }); }
+    catch { rmSync(p, { recursive: true, force: true }); } // stray dir, not a registered worktree
+    removed++;
+    process.stdout.write(`removed ${p}\n`);
+  };
+  for (const r of Journal.list(cwd)) {
+    if (r.ended === 'incomplete') {
+      for (const w of Journal.load(Journal.pathFor(cwd, r.runId)).worktrees) {
+        journaled.add(w.path);
+        process.stdout.write(`keep ${w.path} (run ${r.runId} not ended)\n`);
+      }
+      continue;
+    }
+    for (const w of Journal.load(Journal.pathFor(cwd, r.runId)).worktrees) {
+      journaled.add(w.path);
+      if (existsSync(w.path)) drop(w.path);
+    }
+  }
+  if (flags.all && existsSync(wtRoot)) {
+    for (const d of readdirSync(wtRoot)) {
+      const p = join(wtRoot, d);
+      if (!journaled.has(p)) drop(p);
+    }
+  }
+  process.stdout.write(removed ? `removed ${removed} worktree(s)\n` : 'nothing to clean\n');
+  return 0;
 }

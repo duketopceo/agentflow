@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { basename, join } from 'node:path';
 import { Pool } from './pool.mjs';
 import { Journal } from './journal.mjs';
 import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
@@ -155,12 +156,29 @@ export async function runScript(opts) {
       if (abort.signal.aborted) return { cancelled: true };
       inFlight.add(spec);
       try {
+        // worktree:'auto' — runner-provisioned checkout, journaled. The
+        // adapter never sees the literal (KTD3); 'true' still passes through
+        // for adapter-native worktree flags. Provisioning failure settles
+        // the call as an ordinary error and is never retried.
+        let s = null;
+        if (spec.worktree === 'auto') {
+          try {
+            const root = execFileSync('git', ['-C', spec.cwd ?? cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+            const wt = join(root, '.agentflow', 'worktrees', `${runId}-${i}`);
+            execFileSync('git', ['-C', root, 'worktree', 'add', '--detach', wt, 'HEAD']);
+            spec.cwd = wt;
+            delete spec.worktree;
+            journal.append({ type: 'worktree', i, label: spec.label, path: wt, at: new Date().toISOString() });
+          } catch (e) {
+            const detail = String(e.stderr ?? e.message ?? e).trim().split('\n').pop();
+            s = { ok: false, error: { message: `worktree: ${detail || 'not a git repo'}`, stderrTail: '', code: null, timedOut: false, permissionDenied: false } };
+          }
+        }
         // Bounded retry for transient failures (empty completions, flakes).
         // Never retried: permissionDenied (won't heal) and timedOut (rerun
         // just burns another timeout window). Backoff: 1000ms * attempt.
         const maxAttempts = 1 + Math.max(0, Math.floor(spec.retries ?? retries));
-        let s = null;
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        for (let attempt = 1; s === null && attempt <= maxAttempts; attempt++) {
           s = await adapter.spawnAgent({ ...spec, signal: abort.signal, cwd: spec.cwd ?? cwd });
           if (s?.ok || abort.signal.aborted) break;
           const e = s?.error ?? {};
@@ -168,6 +186,7 @@ export async function runScript(opts) {
           if (attempt < maxAttempts) {
             logLine(`${spec.label} retry ${attempt}/${maxAttempts - 1} (${e.message ?? 'failed'})`);
             await sleep(1000 * attempt);
+            s = null; // retry: clear the failed result, re-enter the loop
           }
         }
         if (abort.signal.aborted && !s?.ok) return { cancelled: true };

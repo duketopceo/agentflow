@@ -47,7 +47,7 @@ replays settled results and re-runs only what never finished.
 
 | Global | Signature | Notes |
 |---|---|---|
-| `agent` | `(prompt, opts?) => Promise<{text, json} \| null>` | opts: `label`, `model`, `schema`, `worktree`, `cwd`, `timeout` (ms), `permission` |
+| `agent` | `(prompt, opts?) => Promise<{text, json} \| null>` | opts: `label`, `model`, `schema`, `worktree`, `cwd`, `timeout` (ms), `permission`, `retries` |
 | `parallel` | `(thunks) => Promise<results>` | `parallel(files.map(f => () => agent(...)))` — order preserved, `null` per failure |
 | `pipeline` | `(items, ...stages) => Promise<results>` | each item flows through stages; `null` short-circuits that item |
 | `phase` | `(name) => void` | labels stderr progress |
@@ -93,6 +93,15 @@ muse, omp, prime-agent — no devin launcher exists. Requires `ori` on PATH;
 `--via` on the CLI or `via: 'ori'` in `agentflow.json` applies to every
 `agent()` call; a call can opt out with `via: 'direct'`.
 
+**`worktree: 'auto'`** gives the call its own git checkout — the runner runs
+`git worktree add --detach` under `.agentflow/worktrees/` and sets that call's
+`cwd` there (journaled as a `worktree` record). Use it when file-mutating
+agents would collide in one checkout. `'auto'` is runner-owned and consumed
+before the adapter sees the spec; `worktree: true` still passes through to
+adapter-native flags (codex `--worktree`). Worktrees deliberately persist
+after the run — `agentflow clean` reclaims them for ended runs (`--all` also
+sweeps unrecorded dirs under `.agentflow/worktrees/`).
+
 Default permission postures are least-privilege (`smart` devin / `auto` claude /
 `workspace-write` codex / none opencode). Headless agents that hit an approval
 prompt fail with `permissionDenied` journaled — prefer widening the prompt or
@@ -126,6 +135,12 @@ keeps running, output in `.agentflow/runs/<id>.log`). `agentflow status <id>`
 prints settled/total + outcome (exit 2 while running), `agentflow tail <id>`
 streams journal events until run-end. Use detach for long fan-outs and check
 back — same model as Claude's detached Workflow.
+
+`agentflow stop <id>` SIGTERMs the journaled pid (verified against its
+recorded start time — a mismatched pid is never signaled) and waits for
+run-end; the run drains, journals `interrupted`, and stays resumable. A run
+whose pid is dead but journal has no run-end reports **orphaned** in
+`status`/`list`/`tail` — resume it with `agentflow run <script> --resume <id>`.
 
 ## Safety
 

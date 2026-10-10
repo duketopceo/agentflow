@@ -81,6 +81,8 @@ export async function main(argv = process.argv.slice(2)) {
       strict: !!(flags.strict || config.strict),
       maxAgents: Number(flags['max-agents'] ?? config.maxAgents) || 1000,
       retries: Number(flags.retries ?? config.retries) || 0,
+      batchPollMs: Number(flags['batch-poll'] ?? config.batchPollMs) || undefined,
+      batchTimeoutMs: Number(flags['batch-timeout'] ?? config.batchTimeoutMs) || undefined,
       resumeId: flags.resume ?? null,
       graceMs: flags.grace ? Number(flags.grace) : undefined,
     });

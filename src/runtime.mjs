@@ -2,6 +2,7 @@ import { readFileSync, existsSync, rmSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { basename, join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { Pool } from './pool.mjs';
 import { Journal } from './journal.mjs';
 import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
@@ -101,6 +102,10 @@ export async function runScript(opts) {
     cache = false,
     maxAgents = 1000,
     retries = 0,
+    batchPollMs = 15_000,
+    batchTimeoutMs = 2 * 3600_000,
+    fetchImpl = undefined,
+    sleep: sleepImpl = undefined,
     err = (s) => process.stderr.write(s + '\n'),
     // Test seam: injected sleep removes wall-clock retry backoff from the
     // suite. Deliberately NOT used by the signal-drain loop below — a poll's
@@ -150,6 +155,12 @@ export async function runScript(opts) {
 
   const pool = new Pool(concurrency);
   const abort = new AbortController();
+  // Test seam + abort-aware sleep for batch polling: tests inject an instant
+  // sleep; the default resolves early when the run aborts (SIGINT drain).
+  const sleep = sleepImpl ?? ((ms) => new Promise((r) => {
+    const t = setTimeout(r, ms);
+    abort.signal.addEventListener('abort', () => { clearTimeout(t); r(); }, { once: true });
+  }));
   const inFlight = new Set();
   const wtRoots = new Map(); // per-call-cwd -> git toplevel cache for worktree:'auto'
   let callIndex = 0;
@@ -258,6 +269,131 @@ export async function runScript(opts) {
     return null;
   }
 
+  // batch(items, opts): one async OR Batch job per call — submit once, poll,
+  // resolve an array aligned to input order (failed items settle null).
+  // Every item consumes a normal call index, so positional --resume replay is
+  // unchanged; a mid-poll interrupt leaves the journaled batch record pending
+  // and resume re-polls that batch_id instead of resubmitting (R3).
+  async function batch(items, batchOpts = {}) {
+    if (!adapter.supportsBatch) {
+      throw new Error(`batch() requires a batch-capable harness (--harness openrouter); got '${adapter.name}'`);
+    }
+    const list = [...(items ?? [])];
+    if (!list.length) return [];
+    const firstI = callIndex;
+    const specs = list.map((it) => {
+      const i = callIndex++;
+      if (i >= maxAgents) throw new Error(`agent-count cap exceeded (max ${maxAgents})`);
+      const spec = { prompt: String(it?.prompt ?? it), label: it?.label ?? `batch-${i}` };
+      for (const [k, v] of Object.entries(typeof it === 'object' && it !== null ? it : {})) {
+        if (k === 'prompt') continue;
+        if (KNOWN_AGENT_OPTS.has(k)) spec[k] = v;
+        else logLine(`warning: unknown batch() option '${k}' ignored`);
+      }
+      return { spec, i };
+    });
+    const model = batchOpts.model ?? specs[0].spec.model;
+    const seen = [...new Set(specs.map(({ spec }) => spec.model ?? model))];
+    if (seen.length !== 1) {
+      throw new Error(`batch() is single-model per call (OR batches carry one model) — got: ${seen.join(', ')}`);
+    }
+    for (const { spec } of specs) spec.model = model;
+
+    // Full replay: every index already settled — zero requests.
+    if (prior && specs.every(({ i }) => prior.settled.has(i))) {
+      logLine(`replay batch[${firstI}..${firstI + specs.length - 1}]`);
+      return specs.map(({ i }) => { const rec = prior.settled.get(i); return rec.ok ? rec.result : null; });
+    }
+
+    const label = `batch[${specs.length}]`;
+    const bodies = specs.map(({ spec }) => adapter.batchBody(spec));
+    // batchBody carries buildBody's default model when none was given.
+    const batchModel = model ?? bodies[0].model;
+    const hash = createHash('sha256').update(JSON.stringify({ model: batchModel, bodies })).digest('hex').slice(0, 16);
+    const io = { signal: abort.signal, fetchImpl: batchOpts.fetchImpl ?? fetchImpl };
+    const started = Date.now();
+    const secs = () => ((Date.now() - started) / 1000).toFixed(1);
+    // Journals one agent record per item at its own index; indices settled by
+    // a prior partial collect are left untouched. Cancelled tasks journal
+    // nothing — the pending batch record is what resume re-polls.
+    const settleAll = (perItem) => {
+      const elapsed = secs();
+      return specs.map(({ spec, i }, k) => {
+        const s = perItem(spec, i, k);
+        if (!prior?.settled.has(i)) {
+          journal.append({
+            type: 'agent', i, label: spec.label, ok: s.ok,
+            ...(s.ok ? { result: s.result } : { error: s.error }),
+            model: spec.model ?? null, elapsed, at: new Date().toISOString(),
+          });
+        }
+        return s;
+      });
+    };
+    const settled = await pool.run(async () => {
+      if (abort.signal.aborted) return { cancelled: true };
+      inFlight.add(label);
+      try {
+        const prev = prior?.batches?.find((b) => b.firstI === firstI && b.count === specs.length);
+        let batchId = null;
+        if (prev?.hash === hash) {
+          batchId = prev.batch_id;
+          logLine(`${label} re-polling journaled batch ${batchId}`);
+        } else {
+          if (prev) logLine(`${label} spec changed since ${prev.batch_id} — submitting fresh`);
+          const sub = await adapter.submitBatch(batchModel, bodies, io);
+          // Aborted mid-submit: the POST may or may not have landed on OR's
+          // side, but no batch_id was journaled — leave indices unsettled so
+          // resume re-runs batch() instead of replaying phantom errors.
+          if (!sub.ok) {
+            if (abort.signal.aborted) return { cancelled: true };
+            return { items: settleAll(() => ({ ok: false, error: sub.error })) };
+          }
+          batchId = sub.batchId;
+          journal.append({ type: 'batch', batch_id: batchId, firstI, count: specs.length, model: batchModel, hash, at: new Date().toISOString() });
+        }
+        const timeoutMs = batchOpts.batchTimeoutMs ?? batchTimeoutMs;
+        const deadline = Date.now() + timeoutMs;
+        for (;;) {
+          if (abort.signal.aborted) return { cancelled: true };
+          const b = await adapter.getBatch(batchId, io);
+          if (!b.ok) {
+            if (b.error?.permissionDenied) {
+              return { items: settleAll(() => ({ ok: false, error: b.error })) };
+            }
+            // Transient poll failure — keep polling until the deadline.
+          } else if (b.status === 'completed') {
+            const byId = adapter.batchResultMap(b.results);
+            return { items: settleAll((spec, i, k) => adapter.batchItemResult(byId.get(`c${k}`), spec)) };
+          } else if (b.status === 'failed' || b.status === 'expired' || b.status === 'cancelled') {
+            const error = { message: `openrouter: batch ${b.status}${b.error?.message ? ` — ${b.error.message}` : ''}`, permissionDenied: false, timedOut: false };
+            return { items: settleAll(() => ({ ok: false, error })) };
+          }
+          if (Date.now() > deadline) {
+            const error = { message: `openrouter: batch ${batchId} did not complete within ${timeoutMs}ms`, permissionDenied: false, timedOut: true };
+            return { items: settleAll(() => ({ ok: false, error })) };
+          }
+          await sleep(batchOpts.batchPollMs ?? batchPollMs);
+        }
+      } catch (e) {
+        if (abort.signal.aborted) return { cancelled: true };
+        const error = { message: String(e?.message ?? e), permissionDenied: false };
+        return { items: settleAll(() => ({ ok: false, error })) };
+      } finally {
+        inFlight.delete(label);
+      }
+    });
+
+    if (settled == null || settled.__agentflowError || settled.cancelled) {
+      const e = settled?.__agentflowError;
+      logLine(`${label} -> null (${e ? String(e.message ?? e).slice(0, 120) : 'cancelled'})`);
+      return null;
+    }
+    const nOk = settled.items.filter((s) => s.ok).length;
+    logLine(`${label} -> ${nOk}/${specs.length} ok (${secs()}s)`);
+    return settled.items.map((s) => (s.ok ? s.result : null));
+  }
+
   const parallel = (thunks) => Promise.all([...thunks].map((t) => (typeof t === 'function' ? t() : t)));
 
   const pipeline = (items, ...stages) =>
@@ -302,7 +438,7 @@ export async function runScript(opts) {
 
   let fn;
   try {
-    fn = new AsyncFunction('agent', 'parallel', 'pipeline', 'phase', 'log', 'args', 'meta', body);
+    fn = new AsyncFunction('agent', 'parallel', 'pipeline', 'phase', 'log', 'batch', 'args', 'meta', body);
   } catch (e) {
     journal.append({ type: 'run-end', reason: 'error', at: new Date().toISOString() });
     err(`agentflow: syntax error in ${scriptName}: ${e.message}`);
@@ -311,7 +447,7 @@ export async function runScript(opts) {
 
   let code = 0;
   try {
-    await fn(agent, parallel, pipeline, phase, log, args, meta);
+    await fn(agent, parallel, pipeline, phase, log, batch, args, meta);
     // If a signal is mid-handling, wait for it: in-flight results must be
     // journaled and the exit code must be the signal code, not success.
     if (signalPromise) process.exit(await signalPromise);

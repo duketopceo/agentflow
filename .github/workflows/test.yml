@@ -1,0 +1,31 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22, 24, 26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci
+      - run: npm test
+
+  # Single required-check target: matrix job names vary with Node versions,
+  # so branch protection points here instead of naming every leg. `if:always()`
+  # + an explicit result check — without it a failed matrix leaves this job
+  # skipped, and a skipped required check reports green.
+  test-suite:
+    needs: test
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: test "${{ needs.test.result }}" = "success"

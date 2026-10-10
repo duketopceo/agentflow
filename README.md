@@ -1,24 +1,38 @@
-# agentflow
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/wordmark-dark.svg">
+    <img src="assets/brand/wordmark.svg" alt="agentflow" width="320">
+  </picture>
+</p>
 
-Cross-harness dynamic workflows: write an orchestration script once, fan out
-one-shot agent sessions (`devin -p`, `claude -p`, `codex exec`, `opencode run`)
-under a bounded concurrency pool, with journaled results and resumable runs.
+<p align="center"><b>Write a multi-agent workflow once as a script, then run it on <code>devin</code>, <code>claude</code>, <code>codex</code> or <code>opencode</code>.</b></p>
 
-The orchestration state lives in the script, not in a model's context window —
-the same architectural move as Claude's native workflows, delivered as a
-portable subprocess runner.
+agentflow is a small Node runner. A workflow is an `.mjs` file; each `agent()`
+call spawns one non-interactive CLI session of the harness you pick, under a
+bounded concurrency pool, and every settled result is journaled so a run can be
+resumed. The plan lives in the script, not in a model's context window. This is
+the same idea as Claude Code's [dynamic workflows](https://code.claude.com/docs/en/workflows),
+delivered as a portable subprocess runner.
 
-## Quickstart
+![agentflow social card: the mark, wordmark and an illustrative run ledger](assets/brand/social-card.png)
+
+> The image is a design proposal with illustrative log lines, not a capture.
+> TODO: replace with a real terminal recording of `agentflow tail` on a live run (needs paid or free-tier model calls, so it was not recorded here).
+
+## Install
+
+Requires Node 20 or newer. From a clone:
 
 ```bash
-bin/agentflow run examples/parallel-audit.mjs --harness echo
-bin/agentflow doctor
+git clone https://github.com/duketopceo/agentflow
+cd agentflow
+bin/agentflow doctor        # which harness CLIs are on PATH
 ```
 
-A workflow script is an `.mjs` file with top-level `await`:
+There is no npm package yet (`"private": true`; see [ROADMAP](ROADMAP.md) U5).
+`npm install` is only needed for the OpenCode plugin.
 
-```js
-export const meta = { name: "audit", description: "..." };
+### As an agent plugin
 
 const results = await parallel(files.map((f) => () =>
   agent(`Review ${f}`, { label: `review:${f}`, model: "cheap" })
@@ -62,8 +76,67 @@ The repo carries a manifest for each harness; all resolve to the shared
 public repo. agentflow is not published to npm — the plugin manifests above
 (or a clone + `npm link`) are the install path.</sub>
 
-The `agents/worker.md` profile gives Devin a cheap disposable subagent
-(`swe-2-*` free tier or `claude-haiku-5-5-low`) for extraction-class fan-out.
+## Quick start
+
+No model calls, no cost:
+
+```bash
+bin/agentflow run examples/parallel-audit.mjs --harness echo
+```
+
+Real harness, cheap model (see `docs/smoke-matrix.md` for tested combinations):
+
+```bash
+bin/agentflow run workflows/deep-research.mjs --harness devin -- "your question"
+bin/agentflow run workflows/deep-research.mjs --harness openrouter --cache -- "your question"   # needs OPENROUTER_API_KEY
+bin/agentflow run my-workflow.mjs --harness claude --via ori -- args   # claude workers billed through OpenRouter
+```
+
+A workflow script has top-level `await` and these globals: `agent`, `parallel`,
+`pipeline`, `phase`, `log`, `args`.
+
+```js
+export const meta = { name: "audit", description: "review every file", phases: ["fan-out"] };
+
+phase("fan-out");
+const results = await parallel(files.map((f) => () =>
+  agent(`Review ${f}`, { label: `review:${f}`, model: "cheap" })
+));
+const good = results.filter(Boolean);   // a failed call is null, not an exception
+```
+
+Commands: `run`, `status <run-id>`, `tail <run-id>`, `list`, `doctor`.
+Useful flags: `--harness`, `--concurrency`, `--via ori`, `--cache`, `--resume <run-id>`,
+`--retries`, `--max-agents`, `--strict`, `--detach`.
+
+## How it works
+
+```mermaid
+flowchart LR
+  S[workflow script .mjs] --> R[runtime: pool + journal]
+  R -->|agent#40;#41; x N| P{adapter}
+  P --> D[devin -p]
+  P --> C[claude -p]
+  P --> X[codex exec]
+  P --> O[opencode run]
+  P --> I[ori code]
+  P --> H[openrouter HTTP]
+  P -.->|--via ori| W[ori wraps the CLI]
+  R --> J[(.agentflow/runs/id.jsonl)]
+  J -->|--resume| R
+```
+
+- **Cross-harness** means: one script, and a thin adapter per CLI that builds
+  argv, spawns the process, classifies failure (timeout, permission denial) and
+  parses output into `{text, json}`. Sessions, tools and context are not shared;
+  workers share only the filesystem.
+- **Journal:** each settled call is one line in `.agentflow/runs/<run-id>.jsonl`.
+  `--resume` replays settled calls by call order, so keep `agent()` call order
+  stable. `--cache` memoises by content (prompt, model, schema, ...) instead.
+- **Limits you should know:** no sandbox beyond what each CLI enforces, no
+  usage/cost numbers in the journal, schema output is validated by prompt and
+  extraction only (native on codex), and `--resume` does not yet check that a
+  prompt is unchanged (ROADMAP U3).
 
 ## Ops
 
@@ -86,11 +159,22 @@ checkout; `clean` reclaims them after the run ends.
 ## Docs
 
 - `skills/agentflow/SKILL.md` — agent-facing guidance (installed per harness)
-- `docs/plans/` — design history
+- `docs/plans/` — design history and the [program roadmap](docs/plans/2026-10-10-005-feat-program-roadmap-plan.md)
 - `docs/smoke-matrix.md` — live per-adapter verification results (`scripts/smoke-harnesses.mjs` reproduces)
-- `docs/research/` — cross-harness landscape + orchestration economics
+- `docs/research/` — cross-harness landscape + orchestration economics; start with `2026-10-10-landscape.md`
+- `DESIGN.md` and `assets/brand/` — design direction and logo proposal
 
 ## Status
 
-Early development. Adapter matrix tested versions are in `bin/agentflow doctor`
-output and each adapter's source comments.
+Early development, v0.2. Plans and priorities are in [ROADMAP.md](ROADMAP.md).
+
+## Contributing
+
+Run `node --test`. Keep changes small and add a test for adapter behaviour; see
+`docs/solutions/agent-orchestration/` for the invariants (notably that every
+`spawnAgent` override must call `applyVia`). Open a PR; the default branch is
+protected.
+
+## License
+
+[MIT](LICENSE)

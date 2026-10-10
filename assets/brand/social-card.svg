@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="agentflow social card">
+  <title>agentflow social card (proposal)</title>
+  <rect width="1200" height="630" fill="#0E1116"/>
+  <g transform="translate(70 66) scale(1.5)">
+    <g fill="none" stroke="#E8ECF2" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M15 27 L23 15 H41 L49 27"/><path d="M15 32 H49"/><path d="M15 37 L23 49 H41 L49 37"/>
+    </g>
+    <circle cx="9" cy="32" r="7" fill="#4FD1C5"/><circle cx="55" cy="32" r="7" fill="#4FD1C5"/>
+  </g>
+  <g transform="translate(210 108) scale(2.4)" fill="none" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#E8ECF2">
+      <g><circle cx="9" cy="10" r="8"/><path d="M17 2 V18"/></g>
+      <g transform="translate(25 0)"><circle cx="9" cy="10" r="8"/><path d="M17 10 V18 Q17 26 9 26 Q4 26 2 22"/></g>
+      <g transform="translate(50 0)"><path d="M1 10 H17 A8 8 0 1 0 14.7 15.7"/></g>
+      <g transform="translate(75 0)"><path d="M1 18 V2 M1 10 C1 4 5 2 9 2 C14 2 17 4 17 10 V18"/></g>
+      <g transform="translate(100 0)"><path d="M7 -3 V14 Q7 18 12 18 M2 2 H12"/></g>
+    </g>
+    <g stroke="#4FD1C5">
+      <g transform="translate(121 0)"><path d="M6 18 V0 Q6 -6 12 -6 M1 2 H11"/></g>
+      <g transform="translate(142 0)"><path d="M4 -6 V18"/></g>
+      <g transform="translate(157 0)"><circle cx="9" cy="10" r="8"/></g>
+      <g transform="translate(182 0)"><path d="M0 2 L4.5 18 L9 6 L13.5 18 L18 2"/></g>
+    </g>
+  </g>
+  <text x="80" y="290" font-family="JetBrainsMono NF, Liberation Mono, monospace" font-size="40" fill="#E8ECF2">The plan lives in the script,</text>
+  <text x="80" y="342" font-family="JetBrainsMono NF, Liberation Mono, monospace" font-size="40" fill="#E8ECF2">not in the model's context window.</text>
+  <g font-family="JetBrainsMono NF, Liberation Mono, monospace" font-size="26" fill="#9AA4B2">
+    <text x="80" y="450">[0]  decompose        ok     4.1s</text>
+    <text x="80" y="490">[1]  research:auth    ok    18.7s</text>
+    <text x="80" y="530">[2]  research:db      null   timeout</text>
+    <text x="80" y="570">[3]  verify:auth      ok     6.2s</text>
+  </g>
+  <g fill="#4FD1C5"><rect x="62" y="426" width="4" height="26"/></g>
+  <text x="1120" y="570" text-anchor="end" font-family="JetBrainsMono NF, Liberation Mono, monospace" font-size="24" fill="#9AA4B2">devin  claude  codex  opencode</text>
+</svg>

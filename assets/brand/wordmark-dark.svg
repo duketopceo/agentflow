@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-6 -14 212 46" width="424" height="92" role="img" aria-label="agentflow">
+  <title>agentflow</title>
+  <g fill="none" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#E8ECF2">
+      <g transform="translate(0 0)"><circle cx="9" cy="10" r="8"/><path d="M17 2 V18"/></g>
+      <g transform="translate(25 0)"><circle cx="9" cy="10" r="8"/><path d="M17 10 V18 Q17 26 9 26 Q4 26 2 22"/></g>
+      <g transform="translate(50 0)"><path d="M1 10 H17 A8 8 0 1 0 14.7 15.7"/></g>
+      <g transform="translate(75 0)"><path d="M1 18 V2 M1 10 C1 4 5 2 9 2 C14 2 17 4 17 10 V18"/></g>
+      <g transform="translate(100 0)"><path d="M7 -3 V14 Q7 18 12 18 M2 2 H12"/></g>
+    </g>
+    <g stroke="#4FD1C5">
+      <g transform="translate(121 0)"><path d="M6 18 V0 Q6 -6 12 -6 M1 2 H11"/></g>
+      <g transform="translate(142 0)"><path d="M4 -6 V18"/></g>
+      <g transform="translate(157 0)"><circle cx="9" cy="10" r="8"/></g>
+      <g transform="translate(182 0)"><path d="M0 2 L4.5 18 L9 6 L13.5 18 L18 2"/></g>
+    </g>
+  </g>
+</svg>

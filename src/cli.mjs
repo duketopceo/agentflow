@@ -9,7 +9,7 @@ const USAGE = `agentflow — cross-harness dynamic workflows
 usage:
   agentflow run <script.mjs> [--harness <name>] [--concurrency <n>]
                 [--via ori] [--cache] [--strict] [--max-agents <n>]
-                [--resume <run-id>] [--grace <ms>] [--cwd <dir>]
+                [--retries <n>] [--resume <run-id>] [--grace <ms>] [--cwd <dir>]
                 [-- <script args>...]
   agentflow doctor
   agentflow list
@@ -69,6 +69,7 @@ export async function main(argv = process.argv.slice(2)) {
       cache: !!(flags.cache || config.cache),
       strict: !!(flags.strict || config.strict),
       maxAgents: Number(flags['max-agents'] ?? config.maxAgents) || 1000,
+      retries: Number(flags.retries ?? config.retries) || 0,
       resumeId: flags.resume ?? null,
       graceMs: flags.grace ? Number(flags.grace) : undefined,
     });

@@ -3,7 +3,9 @@
 //   AGENTFLOW_ECHO_FAIL=<substr>  labels matching fail with a generic error
 //   AGENTFLOW_ECHO_DENY=<substr>  labels matching fail as permissionDenied
 //   AGENTFLOW_ECHO_SLOW=<ms>      sleep ms before responding (timeout tests)
+//   AGENTFLOW_ECHO_FLAKY=<substr> labels matching fail ONCE then succeed (retry tests)
 export const calls = [];
+const flaked = new Set();
 
 export default {
   name: 'echo',
@@ -27,6 +29,11 @@ export default {
     const failRe = process.env.AGENTFLOW_ECHO_FAIL;
     if (failRe && spec.label?.includes(failRe)) {
       return { ok: false, error: { message: 'echo: injected failure', stderrTail: '', code: 1, timedOut: false, permissionDenied: false } };
+    }
+    const flakyRe = process.env.AGENTFLOW_ECHO_FLAKY;
+    if (flakyRe && spec.label?.includes(flakyRe) && !flaked.has(spec.label)) {
+      flaked.add(spec.label);
+      return { ok: false, error: { message: 'echo: injected flake', stderrTail: '', code: 1, timedOut: false, permissionDenied: false } };
     }
     const denyRe = process.env.AGENTFLOW_ECHO_DENY;
     if (denyRe && spec.label?.includes(denyRe)) {

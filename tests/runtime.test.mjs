@@ -341,3 +341,64 @@ log('never');`);
     f.cleanup();
   }
 });
+
+test('retries: transient flake recovers within cap; per-call and run defaults', async () => {
+  const f = fixture();
+  try {
+    process.env.AGENTFLOW_ECHO_FLAKY = 'flaky';
+    f.writeScript(`const a = await agent('x', {label:'flaky-a'});
+const b = await agent('y', {label:'solid-b'});
+log('RESULT:' + JSON.stringify({R: (a?.text ? 'ok' : 'null') + '|' + (b?.text ? 'ok' : 'null')}));`);
+    // Run-level retries=1: flaky-a fails once, retries, succeeds.
+    const res = await f.run({ retries: 1 });
+    assert.equal(res.code, 0);
+    assert.ok(f.lines.some((l) => l.includes('flaky-a retry 1/1')));
+    assert.equal(f.lastResult().R, 'ok|ok');
+    assert.equal(calls.length, 3); // flaky×2 + solid×1
+
+    // No retries (default): flaky is now spent; use permanent FAIL for the null path.
+    delete process.env.AGENTFLOW_ECHO_FLAKY;
+    process.env.AGENTFLOW_ECHO_FAIL = 'doomed';
+    f.writeScript(`const a = await agent('x', {label:'doomed-a'});
+log('done');`);
+    calls.length = 0;
+    await f.run();
+    assert.equal(calls.length, 1); // no retry
+
+    // Permanent failure WITH retries=2: 3 attempts, still null.
+    calls.length = 0;
+    await f.run({ retries: 2 });
+    assert.equal(calls.length, 3);
+
+    // Per-call override beats run default: retries:0 inside agent() with run retries=5.
+    calls.length = 0;
+    f.writeScript(`await agent('x', {label:'doomed-b', retries:0});`);
+    await f.run({ retries: 5 });
+    assert.equal(calls.length, 1);
+  } finally {
+    delete process.env.AGENTFLOW_ECHO_FLAKY;
+    delete process.env.AGENTFLOW_ECHO_FAIL;
+    f.cleanup();
+  }
+});
+
+test('retries: permissionDenied and timeout are never retried', async () => {
+  const f = fixture();
+  try {
+    process.env.AGENTFLOW_ECHO_DENY = 'denied';
+    f.writeScript(`await agent('x', {label:'denied-a'});`);
+    await f.run({ retries: 3 });
+    assert.equal(calls.length, 1);
+    delete process.env.AGENTFLOW_ECHO_DENY;
+
+    process.env.AGENTFLOW_ECHO_SLOW = '5000';
+    f.writeScript(`await agent('x', {label:'slow-a', timeout:50});`);
+    calls.length = 0;
+    await f.run({ retries: 3 });
+    assert.equal(calls.length, 1);
+  } finally {
+    delete process.env.AGENTFLOW_ECHO_DENY;
+    delete process.env.AGENTFLOW_ECHO_SLOW;
+    f.cleanup();
+  }
+});

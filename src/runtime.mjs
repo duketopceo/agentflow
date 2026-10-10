@@ -4,7 +4,7 @@ import { Pool } from './pool.mjs';
 import { Journal } from './journal.mjs';
 import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
 
-const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort']);
+const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries']);
 const DEFAULT_GRACE_MS = 8000;
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
@@ -65,6 +65,7 @@ export async function runScript(opts) {
     via = null,
     cache = false,
     maxAgents = 1000,
+    retries = 0,
     err = (s) => process.stderr.write(s + '\n'),
   } = opts;
 
@@ -149,7 +150,21 @@ export async function runScript(opts) {
       if (abort.signal.aborted) return { cancelled: true };
       inFlight.add(spec);
       try {
-        const s = await adapter.spawnAgent({ ...spec, signal: abort.signal, cwd: spec.cwd ?? cwd });
+        // Bounded retry for transient failures (empty completions, flakes).
+        // Never retried: permissionDenied (won't heal) and timedOut (rerun
+        // just burns another timeout window). Backoff: 1000ms * attempt.
+        const maxAttempts = 1 + Math.max(0, Math.floor(spec.retries ?? retries));
+        let s = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          s = await adapter.spawnAgent({ ...spec, signal: abort.signal, cwd: spec.cwd ?? cwd });
+          if (s?.ok || abort.signal.aborted) break;
+          const e = s?.error ?? {};
+          if (e.permissionDenied || e.timedOut) break;
+          if (attempt < maxAttempts) {
+            logLine(`${spec.label} retry ${attempt}/${maxAttempts - 1} (${e.message ?? 'failed'})`);
+            await new Promise((r) => setTimeout(r, 1000 * attempt));
+          }
+        }
         if (abort.signal.aborted && !s?.ok) return { cancelled: true };
         const secs = ((Date.now() - started) / 1000).toFixed(1);
         if (s.ok) {

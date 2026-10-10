@@ -116,7 +116,10 @@ sub-questions, always end in centralized synthesis/verification
 `new Date`, or `crypto.randomUUID` in the body (line-numbered errors, before
 any agent spawns) — nondeterminism silently misaligns `--resume`'s positional
 replay. `--max-agents <n>` (default 1000) caps total `agent()` calls per run.
-Both are settable in `agentflow.json` (`"strict": true`, `"maxAgents": 200`).
+`--retries <n>` (default 0) re-runs transient failures — cheap models flake on
+empty completions under burst; `agent(p, {retries: 2})` for volume stages.
+Never retried: `permissionDenied` and `timedOut`. All three settable in
+`agentflow.json` (`"strict": true`, `"maxAgents": 200`, `"retries": 1`).
 
 ## Safety
 

@@ -37,11 +37,15 @@ The repo carries a manifest for each harness; all resolve to the shared
 
 | Harness | Install |
 |---|---|
-| Devin | `devin plugins install --local /path/to/agentflow` (reads `.devin-plugin/`; auto-installs the compound-engineering plugin via `requiredPlugins`) |
+| Devin | `devin plugins install -y duketopceo/agentflow` (or `--local /path/to/agentflow`) — reads `.devin-plugin/`; auto-installs the compound-engineering plugin via `requiredPlugins` |
 | Claude Code | `claude plugin marketplace add duketopceo/agentflow` → `.claude-plugin/` — though inside Claude, prefer the native Workflow tool |
 | Codex | `codex plugin marketplace add duketopceo/agentflow` → `.codex-plugin/` |
-| OpenCode | `opencode plugin add github:duketopceo/agentflow` — native plugin with `agentflow_run`/`agentflow_doctor` tools; see `.opencode/INSTALL.md` |
+| OpenCode | `opencode plugin github:duketopceo/agentflow` — native plugin with `agentflow_run`/`agentflow_doctor` tools; see `.opencode/INSTALL.md` |
 | Ori/OpenRouter | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` or `--via ori` |
+
+<sub>Install rows verified from a scratch HOME on 2026-10-10 against the
+public repo. agentflow is not published to npm — the plugin manifests above
+(or a clone + `npm link`) are the install path.</sub>
 
 The `agents/worker.md` profile gives Devin a cheap disposable subagent
 (`swe-2-*` free tier or `claude-haiku-5-5-low`) for extraction-class fan-out.

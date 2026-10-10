@@ -6,10 +6,14 @@ This repo ships a real opencode plugin at `.opencode/plugins/agentflow.ts`
 — it exposes `agentflow_run` and `agentflow_doctor` tools.
 
 ```bash
-opencode plugin add file:/path/to/agentflow
+opencode plugin file:/path/to/agentflow
 # or from git:
-opencode plugin add github:duketopceo/agentflow
+opencode plugin github:duketopceo/agentflow
 ```
+
+(`opencode plugin add …` is wrong for current opencode — `add` is parsed as
+the module name. The bare `opencode plugin <module>` form resolves the
+`exports["./server"]` entrypoint in `package.json`.)
 
 Requires Node.js >= 20 and `agentflow` on PATH (repo `bin/agentflow`, or
 `npm link` inside the repo).

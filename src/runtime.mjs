@@ -97,14 +97,14 @@ export async function runScript(opts) {
 
   // Resume: replay settled results by call index, re-execute the rest.
   const journalDir = Journal.dirFor(cwd);
-  const runId = resumeId ?? Journal.newRunId();
+  const runId = resumeId ?? opts.runId ?? Journal.newRunId();
   const journalPath = Journal.pathFor(cwd, runId);
   const prior = resumeId ? Journal.load(journalPath) : null;
   if (resumeId && !prior.runStart) {
     err(`agentflow: no journal for run '${resumeId}' under ${journalDir}`);
     return { code: 1 };
   }
-  const journal = Journal.create(cwd, { runId, script: scriptName, harness: adapter.name, resumed: !!resumeId });
+  const journal = Journal.create(cwd, { runId, script: scriptName, harness: adapter.name, resumed: !!resumeId, pid: process.pid });
 
   const pool = new Pool(concurrency);
   const abort = new AbortController();

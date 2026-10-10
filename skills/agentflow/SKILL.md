@@ -121,6 +121,12 @@ empty completions under burst; `agent(p, {retries: 2})` for volume stages.
 Never retried: `permissionDenied` and `timedOut`. All three settable in
 `agentflow.json` (`"strict": true`, `"maxAgents": 200`, `"retries": 1`).
 
+**Backgrounded runs:** `--detach` returns immediately with a run-id (the child
+keeps running, output in `.agentflow/runs/<id>.log`). `agentflow status <id>`
+prints settled/total + outcome (exit 2 while running), `agentflow tail <id>`
+streams journal events until run-end. Use detach for long fan-outs and check
+back — same model as Claude's detached Workflow.
+
 ## Safety
 
 **A workflow script is arbitrary code that spawns credentialed agents.** Never

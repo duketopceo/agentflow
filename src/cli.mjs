@@ -1,5 +1,7 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { runScript } from './runtime.mjs';
 import { Journal } from './journal.mjs';
 import { adapters, getAdapter } from './adapters/index.mjs';
@@ -9,8 +11,11 @@ const USAGE = `agentflow — cross-harness dynamic workflows
 usage:
   agentflow run <script.mjs> [--harness <name>] [--concurrency <n>]
                 [--via ori] [--cache] [--strict] [--max-agents <n>]
-                [--retries <n>] [--resume <run-id>] [--grace <ms>] [--cwd <dir>]
+                [--retries <n>] [--resume <run-id>] [--grace <ms>]
+                [--cwd <dir>] [--detach]
                 [-- <script args>...]
+  agentflow status <run-id>        progress + outcome from the journal
+  agentflow tail <run-id>          stream journal events until run-end
   agentflow doctor
   agentflow list
 
@@ -59,9 +64,12 @@ export async function main(argv = process.argv.slice(2)) {
       process.stderr.write(`agentflow: unknown harness '${harnessName}' (have: ${Object.keys(adapters).join(', ')})\n`);
       return 2;
     }
+    if (flags.detach) return detachRun(cwd, argv);
+
     const { code, runId } = await runScript({
       scriptPath: resolve(cwd, script),
       adapter,
+      runId: flags['run-id'] ?? undefined,
       concurrency: Number(flags.concurrency ?? config.concurrency) || 8,
       cwd,
       args: flags.scriptArgs ?? [],
@@ -76,6 +84,9 @@ export async function main(argv = process.argv.slice(2)) {
     if (runId) process.stderr.write(`[agentflow] run ${runId}\n`);
     return code;
   }
+
+  if (cmd === 'status') return statusCmd(cwd, flags._[0], false);
+  if (cmd === 'tail') return statusCmd(cwd, flags._[0], true);
 
   if (cmd === 'doctor') {
     const probes = await Promise.all(Object.entries(adapters).map(async ([name, adapter]) => [name, await adapter.probe()]));
@@ -100,4 +111,59 @@ export async function main(argv = process.argv.slice(2)) {
 
   process.stderr.write(USAGE);
   return cmd ? 2 : 0;
+}
+
+// --detach: respawn this CLI as a detached child with a parent-generated
+// run-id, so the caller learns the id before the child boots. Child output
+// appends to .agentflow/runs/<id>.log; the JSONL journal stays the record.
+const SELF = fileURLToPath(new URL('../bin/agentflow', import.meta.url));
+
+function detachRun(cwd, rawArgv) {
+  const runId = Journal.newRunId();
+  mkdirSync(Journal.dirFor(cwd), { recursive: true });
+  const logFd = openSync(Journal.pathFor(cwd, runId).replace(/\.jsonl$/, '.log'), 'a');
+  const childArgv = rawArgv.filter((a) => a !== '--detach');
+  const dd = childArgv.indexOf('--'); // keep script args trailing
+  const head = dd === -1 ? childArgv : childArgv.slice(0, dd);
+  const tail = dd === -1 ? [] : childArgv.slice(dd);
+  const args = [SELF, ...head, '--run-id', runId, '--cwd', cwd, ...tail];
+  const child = spawn(process.execPath, args, { detached: true, stdio: ['ignore', logFd, logFd], cwd });
+  child.unref();
+  process.stdout.write(`run ${runId} (detached, pid ${child.pid})\n  watch:  agentflow tail ${runId}\n  status: agentflow status ${runId}\n`);
+  return 0;
+}
+
+const END_EXIT = { ok: 0, error: 1, interrupted: 130, 'determinism-lint': 1 };
+const endCode = (rec) => (rec ? (END_EXIT[rec.reason] ?? 1) : 2);
+
+async function statusCmd(cwd, runId, follow) {
+  if (!runId) { process.stderr.write(USAGE); return 2; }
+  const path = Journal.pathFor(cwd, runId);
+  if (!existsSync(path)) { process.stderr.write(`agentflow: no journal for run '${runId}' under ${Journal.dirFor(cwd)}\n`); return 2; }
+
+  if (!follow) {
+    const meta = Journal.load(path);
+    const s = meta.runStart ?? {};
+    process.stdout.write(`run ${runId}  ${s.script ?? '?'}  harness=${s.harness ?? '?'}  at=${s.at ?? '?'}\n`);
+    const cells = [...meta.settled.values()].map((r) => `${r.label}:${r.ok ? 'ok' : 'fail'}`);
+    process.stdout.write(`settled=${meta.settled.size}${cells.length ? '  ' + cells.join('  ') : ''}\n`);
+    process.stdout.write(meta.ended ? `ended: ${meta.ended.reason} at ${meta.ended.at}\n` : `running (pid ${s.pid ?? '?'})\n`);
+    return endCode(meta.ended);
+  }
+
+  const seen = new Set();
+  const print = (rec) => {
+    if (rec.type === 'run-start') process.stdout.write(`run started ${rec.script} harness=${rec.harness}\n`);
+    else if (rec.type === 'agent') process.stdout.write(`[${rec.i}] ${rec.label} -> ${rec.ok ? 'ok' : 'fail'}${rec.model ? ` (${rec.model})` : ''}\n`);
+    else if (rec.type === 'run-end') process.stdout.write(`run ended: ${rec.reason}\n`);
+  };
+  for (;;) {
+    const meta = Journal.load(path);
+    if (meta.runStart && !seen.has('s')) { seen.add('s'); print(meta.runStart); }
+    for (const rec of meta.settled.values()) {
+      if (!seen.has(rec.i)) { seen.add(rec.i); print(rec); }
+    }
+    if (meta.ended) { print(meta.ended); return endCode(meta.ended); }
+    await new Promise((r) => setTimeout(r, 500));
+  }
 }

@@ -27,8 +27,10 @@ const results = await parallel(files.map((f) => () =>
 const good = results.filter(Boolean);
 ```
 
-Globals inside a script: `agent()`, `parallel()`, `pipeline()`, `phase()`,
-`log()`, `args`.
+Globals inside a script: `agent()`, `parallel()`, `pipeline()`, `batch()`,
+`phase()`, `log()`, `args`. `batch()` is the OpenRouter Batch API surface
+(`--harness openrouter`) — one async job per N prompts, ~40–60% cheaper for
+latency-tolerant fan-out, resumable mid-poll.
 
 ## Install as an agent plugin
 

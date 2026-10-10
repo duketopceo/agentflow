@@ -4,5 +4,7 @@
   "strict": true,
   "maxAgents": 1000,
   "cache": true,
-  "retries": 1
+  "retries": 1,
+  "batchPollMs": 15000,
+  "batchTimeoutMs": 7200000
 }

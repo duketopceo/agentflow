@@ -50,6 +50,7 @@ replays settled results and re-runs only what never finished.
 | `agent` | `(prompt, opts?) => Promise<{text, json} \| null>` | opts: `label`, `model`, `schema`, `worktree`, `cwd`, `timeout` (ms), `permission` |
 | `parallel` | `(thunks) => Promise<results>` | `parallel(files.map(f => () => agent(...)))` — order preserved, `null` per failure |
 | `pipeline` | `(items, ...stages) => Promise<results>` | each item flows through stages; `null` short-circuits that item |
+| `batch` | `(items, opts?) => Promise<results>` | **openrouter only** — OR Batch API: one async job per N prompts, ~40–60% off for ≤24h latency-tolerant work. Items: `{prompt, label?, model?, schema?}`; all share ONE model (`opts.model` or per-item). opts: `batchPollMs` (15s), `batchTimeoutMs` (2h). Results align to input order; each item consumes a normal call index |
 | `phase` | `(name) => void` | labels stderr progress |
 | `log` | `(msg) => void` | stderr; keep secrets out |
 | `args` | array | args after `--` on the CLI |
@@ -80,7 +81,10 @@ Constraints:
 
 `openrouter` is the cheapest surface — use it for tool-free stages
 (decompose, classify, verify prose, synthesize); harness adapters only where
-agents need the filesystem. `:batch` slugs do NOT work (separate async API).
+agents need the filesystem. For latency-tolerant volume, `batch(items)`
+submits one OR Batch job instead of N sync calls — the run polls until the
+batch completes (interrupt mid-poll is safe: `--resume` re-polls the same
+batch id, never resubmits). The model must be batch-capable on OR.
 
 **`--via ori`** wraps workers in Ori's OpenRouter environment
 (`ori claude -p ...`) — the harness keeps its own flags and parsing, but
@@ -108,7 +112,10 @@ Prefer cheap models for extraction/verification volume
 `claude-haiku-5-5-low` on devin which is ~$0.10/$0.50, free `swe-2-*`) and
 reserve strong models for the synthesis call. Worker tier × N dominates —
 orchestrator price barely matters. `--cache` memoizes identical calls
-content-keyed across reruns; the research says: fan out on parallelizable
+content-keyed across reruns; `batch()` on openrouter cuts ~40–60% for
+latency-tolerant stages (one job, ≤24h window — poll defaults are
+`batchPollMs`/`batchTimeoutMs` per call or in `agentflow.json`). The
+research says: fan out on parallelizable
 sub-questions, always end in centralized synthesis/verification
 (independent agents amplify errors ~17×), and don't fan out sequential work.
 

@@ -1,79 +1,76 @@
-#!/usr/bin/env node
-// Live adapter smoke runner — reproduces docs/smoke-matrix.md rows on demand.
-// Per row: probe the harness binary, spawn `bin/agentflow run <script>
-// --harness <h> [--via <v>] -- <model>` with a timeout, record pass/latency.
-//
-//   node scripts/smoke-harnesses.mjs [--only echo,ori] [--json] [--script <path>]
-//
-// Emits markdown table rows for docs/smoke-matrix.md (--json for machines).
-// No secrets handled — env is inherited (OR rows need OPENROUTER_API_KEY set
-// to the orchestral eval key per workspace rule, never openrouter/default).
+// Reproducible live smoke matrix — one agentflow run per row (cheap-first).
+// Usage: node scripts/smoke-harnesses.mjs [--json] [--only name,...] [--script path]
+// Rows are cheap-first: stop after the first failure unless you opt out.
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { adapters } from '../src/adapters/index.mjs';
+import { which } from '../src/adapters/which.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BIN = resolve(ROOT, 'bin/agentflow');
 const TIMEOUT_MS = 120_000;
+const CHEAP_MODEL = 'z-ai/glm-5.3-flash';
 
-// Cheap-first matrix — mirrors the 2026-10-09 v0.2 smoke run. Models are the
-// free/lowest-spend route per harness; no premium spend by default.
 const ROWS = [
-  { name: 'echo', harness: 'echo' },
-  { name: 'devin', harness: 'devin', model: 'swe-2-medium' },
-  { name: 'ori', harness: 'ori', model: 'z-ai/glm-5.3-flash' },
-  { name: 'openrouter', harness: 'openrouter', model: 'z-ai/glm-5.3-flash' },
-  { name: 'claude-via-ori', harness: 'claude', via: 'ori', model: 'z-ai/glm-5.3-flash' },
-  { name: 'codex-via-ori', harness: 'codex', via: 'ori', model: 'z-ai/glm-5.3-flash' },
-  { name: 'opencode-via-ori', harness: 'opencode', via: 'ori', model: 'z-ai/glm-5.3-flash' },
+  { name: 'echo', harness: 'echo', spend: 'none' },
+  { name: 'devin', harness: 'devin', model: 'swe-2-medium', spend: 'free (swe-2 tier)' },
+  { name: 'ori', harness: 'ori', model: CHEAP_MODEL, spend: '~$0.01' },
+  { name: 'openrouter', harness: 'openrouter', model: CHEAP_MODEL, spend: '~$0.01' },
+  { name: 'claude-via-ori', harness: 'claude', via: 'ori', model: CHEAP_MODEL, spend: '~$0.01' },
+  { name: 'codex-via-ori', harness: 'codex', via: 'ori', model: CHEAP_MODEL, spend: '~$0.01' },
+  { name: 'opencode-via-ori', harness: 'opencode', via: 'ori', model: CHEAP_MODEL, spend: '~$0.01' },
 ];
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const opts = { json: false, only: null, script: resolve(ROOT, 'examples/smoke.mjs') };
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--json') opts.json = true;
-    else if (argv[i] === '--only') opts.only = argv[++i].split(',');
-    else if (argv[i] === '--script') opts.script = resolve(argv[++i]);
+    const a = argv[i];
+    if (a === '--json') opts.json = true;
+    else if (a === '--only' || a === '--script') {
+      const v = argv[++i];
+      if (v === undefined || v.startsWith('--')) { process.stderr.write(`smoke: ${a} needs a value\n`); process.exit(2); }
+      if (a === '--only') opts.only = v.split(','); else opts.script = resolve(v);
+    } else if (a.startsWith('--')) { process.stderr.write(`smoke: unknown flag ${a}\n`); process.exit(2); }
   }
   return opts;
 }
 
-function which(bin) {
-  const r = spawnSync('which', [bin], { encoding: 'utf8' });
-  return r.status === 0 ? r.stdout.trim() : null;
-}
-
-// Harnesses needing a CLI binary on PATH (echo runs in-process).
-const PROBE_BIN = { devin: 'devin', claude: 'claude', codex: 'codex', opencode: 'opencode', ori: 'ori' };
-
-function runRow(row, script) {
+export async function runRow(row, script) {
   const t0 = Date.now();
-  const bin = PROBE_BIN[row.harness];
-  if (bin && !which(bin)) {
-    return { ...row, ok: false, latencyMs: 0, text: `FAIL (${bin} not on PATH)` };
+  // Probe every binary the row needs: the harness's own plus the via wrapper's.
+  for (const name of [row.harness, row.via].filter(Boolean)) {
+    const bin = adapters[name]?.bin;
+    if (bin && !(await which(bin))) return { ...row, ok: false, latencyMs: 0, text: `FAIL (${bin} not on PATH)` };
   }
   const args = [BIN, 'run', script, '--harness', row.harness];
   if (row.via) args.push('--via', row.via);
   if (row.model) args.push('--', row.model);
-  const r = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: TIMEOUT_MS });
+  const r = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
   const latencyMs = Date.now() - t0;
-  if (r.error?.code === 'ETIMEDOUT') return { ...row, ok: false, latencyMs, text: 'FAIL (timeout)' };
+  if (r.error?.code === 'ETIMEDOUT' || r.signal === 'SIGTERM') return { ...row, ok: false, latencyMs, text: 'FAIL (timeout)' };
   const out = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
-  const pong = /PONG/i.test(out);
+  const pong = /smoke -> .*PONG/m.test(out);
   const tail = out.trim().split('\n').filter(Boolean).pop() ?? '';
   return { ...row, ok: r.status === 0 && pong, latencyMs, text: pong ? 'PONG' : `FAIL (${tail.slice(0, 80)})` };
 }
 
-const opts = parseArgs(process.argv.slice(2));
-const rows = ROWS.filter((r) => !opts.only || opts.only.includes(r.name));
-const results = [];
-for (const row of rows) {
-  const res = runRow(row, opts.script);
-  results.push(res);
-  if (!opts.json) {
-    const inv = `--harness ${res.harness}${res.via ? ` --via ${res.via}` : ''}${res.model ? ` -- ${res.model}` : ''}`;
-    process.stdout.write(`| ${res.name} | \`${inv}\` | ${res.text} | ${(res.latencyMs / 1000).toFixed(1)}s |\n`);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const opts = parseArgs(process.argv.slice(2));
+  const rows = ROWS.filter((r) => !opts.only || opts.only.includes(r.name));
+  if (!rows.length) {
+    process.stderr.write(`smoke: --only matched no rows (have: ${ROWS.map((r) => r.name).join(', ')})\n`);
+    process.exit(2);
   }
+  const results = [];
+  for (const row of rows) {
+    const res = await runRow(row, opts.script);
+    results.push(res);
+    if (!opts.json) {
+      const inv = `agentflow run ${opts.script.split('/').pop()} --harness ${res.harness}${res.via ? ` --via ${res.via}` : ''}`;
+      process.stdout.write(`| ${res.name} | \`${inv}\` | ${res.text} | ${(res.latencyMs / 1000).toFixed(1)}s | ${res.spend ?? '—'} |\n`);
+    }
+  }
+  if (opts.json) process.stdout.write(JSON.stringify(results) + '\n');
+  process.exit(results.every((r) => r.ok) ? 0 : 1);
 }
-if (opts.json) process.stdout.write(JSON.stringify(results, null, 2) + '\n');
-process.exit(results.every((r) => r.ok) ? 0 : 1);

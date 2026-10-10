@@ -34,7 +34,25 @@ test('Journal.list summarizes runs', () => {
     assert.equal(runs.length, 1);
     assert.equal(runs[0].runId, 'rx');
     assert.equal(runs[0].settled, 1);
-    assert.equal(runs[0].ended, 'incomplete');
+    assert.equal(runs[0].ended, null); // not ended — display layer renders 'incomplete'
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a later run-start supersedes an earlier run-end (resume epoch)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'af-j-'));
+  try {
+    const j = Journal.create(dir, { runId: 'res', script: 's.mjs', harness: 'echo' });
+    j.append({ type: 'run-end', reason: 'interrupted' });
+    const loaded1 = Journal.load(j.path);
+    assert.equal(loaded1.ended.reason, 'interrupted');
+    // The resumed attempt appends a second run-start — the stale run-end
+    // must not make the live epoch look finished.
+    j.append({ type: 'run-start', runId: 'res', script: 's.mjs', harness: 'echo', resumed: true, pid: 1, at: new Date().toISOString() });
+    const loaded2 = Journal.load(j.path);
+    assert.equal(loaded2.ended, null);
+    assert.equal(loaded2.runStart.resumed, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

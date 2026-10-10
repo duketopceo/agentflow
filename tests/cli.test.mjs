@@ -171,8 +171,18 @@ test('stop: pid-reuse guard refuses a live process started after journal time', 
   }
 });
 
+// A live pid whose cmdline contains 'agentflow' — pidState requires both
+// liveness and an agentflow-shaped process before a run counts as running.
+function fakeRunner(dir) {
+  const file = join(dir, 'agentflow-sleeper.mjs');
+  writeFileSync(file, 'setTimeout(() => {}, 60000)');
+  const p = spawn(process.execPath, [file], { stdio: 'ignore' });
+  return p;
+}
+
 test('clean: removes ended-run worktrees, keeps running runs, --all sweeps strays', async () => {
   const f = fixture();
+  const sleeper = fakeRunner(f.dir);
   try {
     execFileSync('git', ['init', '-q'], { cwd: f.dir });
     execFileSync('git', ['-C', f.dir, 'config', 'user.email', 't@t']);
@@ -192,12 +202,12 @@ test('clean: removes ended-run worktrees, keeps running runs, --all sweeps stray
     mkdirSync(wtStray, { recursive: true });
     seedJournal(f.dir, 'ended-1', [
       { type: 'run-start', runId: 'ended-1', script: 'w.mjs', harness: 'echo', pid: 999999, at: new Date().toISOString() },
-      { type: 'worktree', i: 0, label: 'a', path: wtEnded, at: new Date().toISOString() },
+      { type: 'worktree', i: 0, label: 'a', path: wtEnded, root: f.dir, at: new Date().toISOString() },
       { type: 'run-end', reason: 'ok', at: new Date().toISOString() },
     ]);
     seedJournal(f.dir, 'live-1', [
-      { type: 'run-start', runId: 'live-1', script: 'w.mjs', harness: 'echo', pid: process.pid, at: new Date().toISOString() },
-      { type: 'worktree', i: 0, label: 'a', path: wtLive, at: new Date().toISOString() },
+      { type: 'run-start', runId: 'live-1', script: 'w.mjs', harness: 'echo', pid: sleeper.pid, at: new Date().toISOString() },
+      { type: 'worktree', i: 0, label: 'a', path: wtLive, root: f.dir, at: new Date().toISOString() },
     ]);
 
     // Default clean: ended-run worktree gone, live + stray kept.
@@ -213,6 +223,148 @@ test('clean: removes ended-run worktrees, keeps running runs, --all sweeps stray
     assert.ok(!existsSync(wtStray), 'stray dir not swept');
     assert.ok(existsSync(wtLive), 'live-run worktree wrongly removed by --all');
   } finally {
+    sleeper.kill('SIGKILL');
     f.cleanup();
   }
+});
+
+test('status: a resumed run (run-start after run-end) is not reported ended', async () => {
+  const f = fixture();
+  try {
+    seedJournal(f.dir, 'res-1', [
+      { type: 'run-start', runId: 'res-1', script: 'w.mjs', harness: 'echo', pid: 999999, at: new Date().toISOString() },
+      { type: 'run-end', reason: 'ok', at: new Date().toISOString() },
+      { type: 'run-start', runId: 'res-1', script: 'w.mjs', harness: 'echo', pid: 999999, at: new Date().toISOString() },
+    ]);
+    const status = await cli(['status', 'res-1'], f.dir);
+    assert.equal(status.code, 2);
+    assert.ok(status.out.includes('orphaned'), status.out); // dead pid epoch, not 'ended: ok'
+    assert.ok(!status.out.includes('ended: ok'), status.out);
+  } finally { f.cleanup(); }
+});
+
+test('stop: malformed run-start.at refuses to signal (NaN must not bypass)', async () => {
+  const f = fixture();
+  const sleeper = fakeRunner(f.dir);
+  try {
+    seedJournal(f.dir, 'bad-at', [
+      { type: 'run-start', runId: 'bad-at', script: 'w.mjs', harness: 'echo', pid: sleeper.pid, at: 'not-a-date' },
+    ]);
+    const stop = await cli(['stop', 'bad-at'], f.dir);
+    assert.equal(stop.code, 1);
+    assert.ok(stop.err.includes('refusing to signal'), stop.err);
+    let alive = false;
+    try { process.kill(sleeper.pid, 0); alive = true; } catch {}
+    assert.ok(alive, 'unverifiable pid was signaled');
+  } finally {
+    sleeper.kill('SIGKILL');
+    f.cleanup();
+  }
+});
+
+test('stop: a reused pid (non-agentflow process) is refused even when timestamp matches', async () => {
+  const f = fixture();
+  const sleeper = spawn('sleep', ['60']);
+  try {
+    seedJournal(f.dir, 'other-1', [
+      { type: 'run-start', runId: 'other-1', script: 'w.mjs', harness: 'echo', pid: sleeper.pid, at: new Date().toISOString() },
+    ]);
+    const stop = await cli(['stop', 'other-1'], f.dir);
+    assert.equal(stop.code, 1);
+    assert.ok(stop.err.includes('refusing to signal'), stop.err);
+    let alive = false;
+    try { process.kill(sleeper.pid, 0); alive = true; } catch {}
+    assert.ok(alive, 'unrelated process was signaled');
+  } finally {
+    sleeper.kill('SIGKILL');
+    f.cleanup();
+  }
+});
+
+test('tail: dead-pid run reports orphaned and exits instead of hanging', async () => {
+  const f = fixture();
+  try {
+    seedJournal(f.dir, 'tail-orph', [
+      { type: 'run-start', runId: 'tail-orph', script: 'w.mjs', harness: 'echo', pid: 999999, at: new Date().toISOString() },
+    ]);
+    const tail = await cli(['tail', 'tail-orph'], f.dir, 8000);
+    assert.equal(tail.code, 2);
+    assert.ok(tail.out.includes('orphaned'), tail.out);
+  } finally { f.cleanup(); }
+});
+
+test('clean: journaled path outside .agentflow/worktrees/ is skipped, never deleted', async () => {
+  const f = fixture();
+  try {
+    const victim = join(f.dir, 'precious');
+    mkdirSync(victim);
+    writeFileSync(join(victim, 'keep.txt'), 'x');
+    seedJournal(f.dir, 'evil-1', [
+      { type: 'run-start', runId: 'evil-1', script: 'w.mjs', harness: 'echo', pid: 999999, at: new Date().toISOString() },
+      { type: 'worktree', i: 0, label: 'a', path: victim, at: new Date().toISOString() },
+      { type: 'run-end', reason: 'ok', at: new Date().toISOString() },
+    ]);
+    const clean = await cli(['clean'], f.dir);
+    assert.equal(clean.code, 0);
+    assert.ok(clean.out.includes('skip'), clean.out);
+    assert.ok(existsSync(join(victim, 'keep.txt')), 'containment check failed: file outside worktrees deleted');
+  } finally { f.cleanup(); }
+});
+
+test('clean: an orphaned (dead-pid) run\'s worktree is reclaimed', async () => {
+  const f = fixture();
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: f.dir });
+    execFileSync('git', ['-C', f.dir, 'config', 'user.email', 't@t']);
+    execFileSync('git', ['-C', f.dir, 'config', 'user.name', 't']);
+    writeFileSync(join(f.dir, 'f.txt'), 'x');
+    execFileSync('git', ['-C', f.dir, 'add', '.']);
+    execFileSync('git', ['-C', f.dir, 'commit', '-qm', 'init']);
+    const wtOrphan = join(f.dir, '.agentflow', 'worktrees', 'orph-1-0');
+    execFileSync('git', ['-C', f.dir, 'worktree', 'add', '--detach', wtOrphan, 'HEAD']);
+    seedJournal(f.dir, 'orph-1', [
+      { type: 'run-start', runId: 'orph-1', script: 'w.mjs', harness: 'echo', pid: 999999, at: new Date().toISOString() },
+      { type: 'worktree', i: 0, label: 'a', path: wtOrphan, root: f.dir, at: new Date().toISOString() },
+    ]);
+    const clean = await cli(['clean'], f.dir);
+    assert.equal(clean.code, 0);
+    assert.ok(!existsSync(wtOrphan), 'orphaned run\'s worktree not reclaimed');
+  } finally { f.cleanup(); }
+});
+
+test('clean --all from a repo subdirectory keeps registered worktrees, sweeps strays', async () => {
+  const f = fixture();
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: f.dir });
+    execFileSync('git', ['-C', f.dir, 'config', 'user.email', 't@t']);
+    execFileSync('git', ['-C', f.dir, 'config', 'user.name', 't']);
+    writeFileSync(join(f.dir, 'f.txt'), 'x');
+    execFileSync('git', ['-C', f.dir, 'add', '.']);
+    execFileSync('git', ['-C', f.dir, 'commit', '-qm', 'init']);
+    const sub = join(f.dir, 'sub');
+    mkdirSync(sub);
+    const wtRegistered = join(f.dir, '.agentflow', 'worktrees', 'reg-1');
+    const wtStray = join(f.dir, '.agentflow', 'worktrees', 'stray-1');
+    execFileSync('git', ['-C', f.dir, 'worktree', 'add', '--detach', wtRegistered, 'HEAD']);
+    mkdirSync(wtStray, { recursive: true });
+    // No journal records under the subdir — registered-but-unjournaled must be kept.
+    const clean = await cli(['clean', '--all'], sub);
+    assert.equal(clean.code, 0);
+    assert.ok(clean.out.includes('registered worktree'), clean.out);
+    assert.ok(existsSync(wtRegistered), 'registered worktree wrongly removed');
+    assert.ok(!existsSync(wtStray), 'stray dir not swept');
+  } finally { f.cleanup(); }
+});
+
+test('run-id path traversal is rejected for status and --run-id', async () => {
+  const f = fixture();
+  try {
+    const bad = await cli(['status', '../../tmp/evil'], f.dir);
+    assert.equal(bad.code, 2);
+    assert.ok(bad.err.includes('invalid run-id'), bad.err);
+    f.write('w.mjs', `await agent('x');`);
+    const run = await cli(['run', 'w.mjs', '--harness', 'echo', '--run-id', '../escape'], f.dir);
+    assert.equal(run.code, 1);
+    assert.ok(run.err.includes('invalid run-id'), run.err);
+  } finally { f.cleanup(); }
 });

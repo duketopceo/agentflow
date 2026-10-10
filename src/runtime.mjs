@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { readFileSync, existsSync, rmSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { basename, join } from 'node:path';
 import { Pool } from './pool.mjs';
 import { Journal } from './journal.mjs';
@@ -54,6 +55,39 @@ function extractMeta(source, scriptName) {
   return { meta, source: source.slice(0, m.index) + source.slice(tail) };
 }
 
+const execFileP = promisify(execFile);
+const GIT_TIMEOUT = { timeout: 60_000, killSignal: 'SIGKILL' };
+
+// Provision `<root>/.agentflow/worktrees/<name>` as a detached HEAD checkout.
+// Async — a synchronous spawn inside the pool task would stall every
+// in-flight call's I/O (and the signal drain) for the full checkout. A dir
+// left by a prior attempt of the same run (resume replays unsettled calls)
+// is reused when it's still a valid worktree; anything else is reclaimed and
+// re-provisioned. `roots` memoizes rev-parse per call cwd.
+async function provisionWorktree(base, name, roots) {
+  let root = roots.get(base);
+  if (root === undefined) {
+    root = (await execFileP('git', ['-C', base, 'rev-parse', '--show-toplevel'], { ...GIT_TIMEOUT, encoding: 'utf8' })).stdout.trim();
+    roots.set(base, root);
+  }
+  const wt = join(root, '.agentflow', 'worktrees', name);
+  const add = () => execFileP('git', ['-C', root, 'worktree', 'add', '--detach', wt, 'HEAD'], GIT_TIMEOUT);
+  if (existsSync(wt)) {
+    // A real worktree has a `.git` pointer file — a plain dir inside the repo
+    // would pass `rev-parse` (walks up to the parent repo), so check the file.
+    if (existsSync(join(wt, '.git'))) return { wt, root, reused: true };
+    try { await execFileP('git', ['-C', root, 'worktree', 'remove', '--force', wt], GIT_TIMEOUT); } catch {}
+    rmSync(wt, { recursive: true, force: true });
+  }
+  try { await add(); }
+  catch {
+    // dir is gone but git still holds a stale registration (interrupted rm)
+    await execFileP('git', ['-C', root, 'worktree', 'prune'], GIT_TIMEOUT);
+    await add();
+  }
+  return { wt, root, reused: false };
+}
+
 export async function runScript(opts) {
   const {
     scriptPath,
@@ -104,17 +138,20 @@ export async function runScript(opts) {
   // Resume: replay settled results by call index, re-execute the rest.
   const journalDir = Journal.dirFor(cwd);
   const runId = resumeId ?? opts.runId ?? Journal.newRunId();
-  const journalPath = Journal.pathFor(cwd, runId);
+  let journalPath;
+  try { journalPath = Journal.pathFor(cwd, runId); }
+  catch (e) { err(`agentflow: ${e.message}`); return { code: 1 }; }
   const prior = resumeId ? Journal.load(journalPath) : null;
   if (resumeId && !prior.runStart) {
     err(`agentflow: no journal for run '${resumeId}' under ${journalDir}`);
     return { code: 1 };
   }
-  const journal = Journal.create(cwd, { runId, script: scriptName, harness: adapter.name, resumed: !!resumeId, pid: process.pid });
+  const journal = Journal.create(cwd, { runId, script: scriptName, harness: adapter.name, resumed: !!resumeId, pid: process.pid, graceMs });
 
   const pool = new Pool(concurrency);
   const abort = new AbortController();
   const inFlight = new Set();
+  const wtRoots = new Map(); // per-call-cwd -> git toplevel cache for worktree:'auto'
   let callIndex = 0;
   let phaseName = null;
   let interrupted = false;
@@ -163,12 +200,10 @@ export async function runScript(opts) {
         let s = null;
         if (spec.worktree === 'auto') {
           try {
-            const root = execFileSync('git', ['-C', spec.cwd ?? cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-            const wt = join(root, '.agentflow', 'worktrees', `${runId}-${i}`);
-            execFileSync('git', ['-C', root, 'worktree', 'add', '--detach', wt, 'HEAD']);
+            const { wt, root, reused } = await provisionWorktree(spec.cwd ?? cwd, `${runId}-${i}`, wtRoots);
             spec.cwd = wt;
             delete spec.worktree;
-            journal.append({ type: 'worktree', i, label: spec.label, path: wt, at: new Date().toISOString() });
+            if (!reused) journal.append({ type: 'worktree', i, label: spec.label, path: wt, root, at: new Date().toISOString() });
           } catch (e) {
             const detail = String(e.stderr ?? e.message ?? e).trim().split('\n').pop();
             s = { ok: false, error: { message: `worktree: ${detail || 'not a git repo'}`, stderrTail: '', code: null, timedOut: false, permissionDenied: false } };

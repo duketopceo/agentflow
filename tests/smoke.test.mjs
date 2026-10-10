@@ -1,13 +1,17 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const SMOKE = fileURLToPath(new URL('../scripts/smoke-harnesses.mjs', import.meta.url));
-const run = (args, env = {}) => spawnSync(process.execPath, [SMOKE, ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
+// Smoke rows spawn real `agentflow run` children — run them from a tmp cwd so
+// their journals never land in the repo's .agentflow/runs/.
+const SMOKE_CWD = mkdtempSync(join(tmpdir(), 'af-smoke-cwd-'));
+after(() => rmSync(SMOKE_CWD, { recursive: true, force: true }));
+const run = (args, env = {}) => spawnSync(process.execPath, [SMOKE, ...args], { cwd: SMOKE_CWD, encoding: 'utf8', env: { ...process.env, ...env } });
 
 test('smoke --only echo --json: free row, PONG, parseable result shape', () => {
   const r = run(['--only', 'echo', '--json']);
@@ -47,7 +51,28 @@ test('smoke: failing workflow records FAIL with stderr tail', () => {
   }
 });
 
-test('smoke markdown mode emits table rows', () => {
+test('smoke markdown mode emits the five-column table', () => {
   const r = run(['--only', 'echo']);
-  assert.match(r.stdout, /\| echo \| `--harness echo` \| PONG \|/);
+  const row = r.stdout.split('\n').find((l) => l.startsWith('| echo |'));
+  assert.ok(row, r.stdout);
+  // name | invocation | result | latency | spend — docs/smoke-matrix.md's shape.
+  assert.equal(row.split('|').length - 2, 5, row);
+  assert.match(row, /\| echo \| `agentflow run smoke\.mjs --harness echo` \| PONG \| [\d.]+s \| none \|/);
+});
+
+test('smoke --only matching no rows exits 2 with a clear error', () => {
+  const r = run(['--only', 'nonexistent-harness']);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /matched no rows/);
+});
+
+test('smoke flag swallowing a value exits 2 (--only --json)', () => {
+  const r = run(['--only', '--json']);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /needs a value/);
+});
+
+test('smoke runs its children in a throwaway cwd (journals land there, not the repo)', () => {
+  run(['--only', 'echo', '--json']);
+  assert.ok(existsSync(join(SMOKE_CWD, '.agentflow', 'runs')), 'child journal missing from tmp cwd');
 });

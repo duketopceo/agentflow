@@ -136,11 +136,27 @@ prints settled/total + outcome (exit 2 while running), `agentflow tail <id>`
 streams journal events until run-end. Use detach for long fan-outs and check
 back — same model as Claude's detached Workflow.
 
-`agentflow stop <id>` SIGTERMs the journaled pid (verified against its
-recorded start time — a mismatched pid is never signaled) and waits for
-run-end; the run drains, journals `interrupted`, and stays resumable. A run
-whose pid is dead but journal has no run-end reports **orphaned** in
-`status`/`list`/`tail` — resume it with `agentflow run <script> --resume <id>`.
+`agentflow stop <id>` SIGTERMs the journaled pid only when it verifies as the
+run's own process (agentflow cmdline + start time matching the journal — a
+reused or unverifiable pid is never signaled), then waits for run-end up to
+`grace + 15s`; a still-draining run stays resumable and `status` keeps
+reporting it. Exit codes for `status`/`tail`: `0` ended ok, `1` ended
+error/determinism-lint, `130` interrupted, `2` running / orphaned /
+no-journal (stdout says which). A run whose pid is dead but journal has no
+run-end reports **orphaned** — resume it with `agentflow run <script>
+--resume <id>`; a re-run `run-start` supersedes the old `run-end`, so a
+resumed run shows as running again.
+
+All run commands are **cwd-rooted**: journals and worktrees resolve against
+the run's `--cwd` (default: your shell cwd). Run `status`/`stop`/`clean` from
+the same directory you ran `run` from (or pass `--cwd`).
+
+`agentflow clean` reclaims worktrees of runs that are not live — including
+orphaned ones — and runs `git worktree prune`. **`clean` force-removes**:
+uncommitted agent work in a worktree is destroyed. Harvest or commit
+anything you want from a worktree before cleaning; `--all` additionally
+sweeps dirs under `.agentflow/worktrees/` with no journal record or live
+registration.
 
 ## Safety
 

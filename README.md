@@ -56,9 +56,13 @@ The `agents/worker.md` profile gives Devin a cheap disposable subagent
 bin/agentflow run w.mjs --detach   # background; journal keeps the record
 bin/agentflow status <run-id>      # progress; 'orphaned' if the pid died
 bin/agentflow stop <run-id>        # SIGTERM the journaled pid (resumable)
-bin/agentflow clean [--all]        # reclaim worktrees of ended runs
+bin/agentflow clean [--all]        # reclaim worktrees of non-live runs (force!)
 node scripts/smoke-harnesses.mjs   # reproducible live-adapter matrix
 ```
+
+Ops commands are cwd-rooted — run them from the directory you ran `run`
+from. `clean` force-removes worktrees (ended *and* orphaned runs): harvest
+agent work first.
 
 `agent(p, {worktree: 'auto'})` runs the call in its own `git worktree` under
 `.agentflow/worktrees/` — isolates file-mutating agents from the main

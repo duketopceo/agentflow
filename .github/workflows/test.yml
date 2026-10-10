@@ -16,12 +16,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+      - run: npm ci
       - run: npm test
 
   # Single required-check target: matrix job names vary with Node versions,
-  # so branch protection points here instead of naming every leg.
+  # so branch protection points here instead of naming every leg. `if:always()`
+  # + an explicit result check — without it a failed matrix leaves this job
+  # skipped, and a skipped required check reports green.
   test-suite:
     needs: test
     runs-on: ubuntu-latest
+    if: always()
     steps:
-      - run: echo "matrix green"
+      - run: test "${{ needs.test.result }}" = "success"

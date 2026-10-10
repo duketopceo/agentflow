@@ -31,9 +31,12 @@ export default {
     const s = withSchemaPrompt(spec);
     const signals = [AbortSignal.timeout(spec.timeout ?? 120_000)];
     if (spec.signal) signals.push(spec.signal);
+    // spec.fetchImpl: test seam — fake responses without network. Same seam
+    // serves the /batches client (batch plan).
+    const doFetch = spec.fetchImpl ?? fetch;
     let r, data;
     try {
-      r = await fetch(URL, {
+      r = await doFetch(URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(this.buildBody(s)),

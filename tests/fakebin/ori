@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+import { main, wantsSchema, writeLastMessage, FENCED } from './lib.mjs';
+await main(process.argv.slice(2), (argv) => {
+  // ori wraps other harnesses: `ori claude -p ...`, `ori codex --model X exec -o F`.
+  // Honor -o so wrapped codex's file capture still works; dump argv when asked.
+  writeLastMessage(argv, 'PONG');
+  process.stdout.write((wantsSchema(argv) ? FENCED : 'PONG') + '\n');
+});

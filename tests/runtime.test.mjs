@@ -350,7 +350,7 @@ test('retries: transient flake recovers within cap; per-call and run defaults', 
 const b = await agent('y', {label:'solid-b'});
 log('RESULT:' + JSON.stringify({R: (a?.text ? 'ok' : 'null') + '|' + (b?.text ? 'ok' : 'null')}));`);
     // Run-level retries=1: flaky-a fails once, retries, succeeds.
-    const res = await f.run({ retries: 1 });
+    const res = await f.run({ retries: 1, sleep: async () => {} });
     assert.equal(res.code, 0);
     assert.ok(f.lines.some((l) => l.includes('flaky-a retry 1/1')));
     assert.equal(f.lastResult().R, 'ok|ok');
@@ -367,13 +367,13 @@ log('done');`);
 
     // Permanent failure WITH retries=2: 3 attempts, still null.
     calls.length = 0;
-    await f.run({ retries: 2 });
+    await f.run({ retries: 2, sleep: async () => {} });
     assert.equal(calls.length, 3);
 
     // Per-call override beats run default: retries:0 inside agent() with run retries=5.
     calls.length = 0;
     f.writeScript(`await agent('x', {label:'doomed-b', retries:0});`);
-    await f.run({ retries: 5 });
+    await f.run({ retries: 5, sleep: async () => {} });
     assert.equal(calls.length, 1);
   } finally {
     delete process.env.AGENTFLOW_ECHO_FLAKY;
@@ -387,14 +387,14 @@ test('retries: permissionDenied and timeout are never retried', async () => {
   try {
     process.env.AGENTFLOW_ECHO_DENY = 'denied';
     f.writeScript(`await agent('x', {label:'denied-a'});`);
-    await f.run({ retries: 3 });
+    await f.run({ retries: 3, sleep: async () => {} });
     assert.equal(calls.length, 1);
     delete process.env.AGENTFLOW_ECHO_DENY;
 
     process.env.AGENTFLOW_ECHO_SLOW = '5000';
     f.writeScript(`await agent('x', {label:'slow-a', timeout:50});`);
     calls.length = 0;
-    await f.run({ retries: 3 });
+    await f.run({ retries: 3, sleep: async () => {} });
     assert.equal(calls.length, 1);
   } finally {
     delete process.env.AGENTFLOW_ECHO_DENY;

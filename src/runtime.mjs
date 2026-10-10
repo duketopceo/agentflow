@@ -67,6 +67,9 @@ export async function runScript(opts) {
     maxAgents = 1000,
     retries = 0,
     err = (s) => process.stderr.write(s + '\n'),
+    // Test seam: injected sleep removes wall-clock backoff/drain waits from
+    // the suite. Production callers leave the default.
+    sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   } = opts;
 
   const scriptName = basename(scriptPath);
@@ -162,7 +165,7 @@ export async function runScript(opts) {
           if (e.permissionDenied || e.timedOut) break;
           if (attempt < maxAttempts) {
             logLine(`${spec.label} retry ${attempt}/${maxAttempts - 1} (${e.message ?? 'failed'})`);
-            await new Promise((r) => setTimeout(r, 1000 * attempt));
+            await sleep(1000 * attempt);
           }
         }
         if (abort.signal.aborted && !s?.ok) return { cancelled: true };
@@ -224,12 +227,12 @@ export async function runScript(opts) {
       pool.drain();
       const deadline = Date.now() + graceMs;
       while (inFlight.size && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 50));
+        await sleep(50);
       }
       if (inFlight.size) {
         logLine(`aborting ${inFlight.size} in-flight agent(s)`);
         abort.abort();
-        await new Promise((r) => setTimeout(r, 500));
+        await sleep(500);
       }
       journal.append({ type: 'run-end', reason: 'interrupted', at: new Date().toISOString() });
       logLine(`run ${runId} interrupted — resume with: agentflow run ${scriptName} --resume ${runId}`);

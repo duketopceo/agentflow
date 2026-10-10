@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+import { main, wantsSchema, FENCED } from './lib.mjs';
+await main(process.argv.slice(2), (argv) => {
+  const result = wantsSchema(argv) ? FENCED : 'PONG';
+  process.stdout.write(JSON.stringify({ type: 'result', result }) + '\n');
+});

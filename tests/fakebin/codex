@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+import { main, wantsSchema, writeLastMessage } from './lib.mjs';
+await main(process.argv.slice(2), (argv) => {
+  // Final answer goes to the -o file, NOT stdout — mirrors real codex exec.
+  writeLastMessage(argv, wantsSchema(argv) ? '{"ok":true}' : 'PONG');
+  process.stdout.write('{"type":"item.completed","item":{"type":"agent_message"}}\n');
+});

@@ -30,6 +30,7 @@ export function foldState(records) {
         i: rec.i, label: rec.label, model: rec.model,
         state: rec.ok ? 'ok' : 'fail', at: rec.at, elapsed: rec.elapsed,
         error: rec.ok ? null : (rec.error?.message ?? 'failed'),
+        usage: rec.result?.usage ?? rec.error?.usage ?? null,
       });
     } else if (rec.type === 'batch') {
       state.batches.set(rec.batch_id, { id: rec.batch_id, firstI: rec.firstI, count: rec.count, model: rec.model, status: 'submitted', poll: null });
@@ -51,6 +52,10 @@ export function foldState(records) {
 const SPIN = ['◐', '◓', '◑', '◒'];
 const ICON = { 'in-flight': '◐', ok: '●', fail: '○', abandoned: '◌' };
 const trunc = (s, n) => (String(s ?? '').length > n ? String(s).slice(0, Math.max(1, n - 1)) + '…' : String(s ?? ''));
+
+const fmtTok = (n) => (n == null ? '?' : n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+// '37k/41' = prompt/completion tokens for one call or the run total.
+const tokPair = (u) => (u ? ` ${fmtTok(u.promptTokens)}/${fmtTok(u.completionTokens)}` : '');
 
 const fmtSecs = (ms) => {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -85,9 +90,9 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
       const age = lane.at ? ` ${fmtSecs(now - Date.parse(lane.at))}` : '';
       lines.push(`${spin} ${label.padEnd(Math.floor(w * 0.45))} in-flight${age}`);
     } else if (lane.state === 'ok') {
-      lines.push(`${ICON.ok} ${label.padEnd(Math.floor(w * 0.45))} ok ${lane.elapsed ?? ''}s`);
+      lines.push(`${ICON.ok} ${label.padEnd(Math.floor(w * 0.45))} ok ${lane.elapsed ?? ''}s${tokPair(lane.usage)}`);
     } else if (lane.state === 'fail') {
-      lines.push(`${ICON.fail} ${label.padEnd(Math.floor(w * 0.45))} fail ${lane.elapsed ?? ''}s  ${trunc(lane.error, Math.floor(w * 0.35))}`);
+      lines.push(`${ICON.fail} ${label.padEnd(Math.floor(w * 0.45))} fail ${lane.elapsed ?? ''}s${tokPair(lane.usage)}  ${trunc(lane.error, Math.floor(w * 0.35))}`);
     } else {
       lines.push(`${ICON.abandoned} ${label.padEnd(Math.floor(w * 0.45))} abandoned`);
     }
@@ -100,9 +105,11 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
   }
 
   const nAbandoned = lanes.filter((l) => l.state === 'abandoned').length;
+  const tot = lanes.reduce((a, l) => (l.usage ? { p: a.p + (l.usage.promptTokens ?? 0), c: a.c + (l.usage.completionTokens ?? 0), n: a.n + 1 } : a), { p: 0, c: 0, n: 0 });
+  const tokTotal = tot.n ? `  tok ${fmtTok(tot.p)}/${fmtTok(tot.c)}` : '';
   lines.push(rule);
   lines.push(state.done
-    ? `run ${state.done.reason}  —  ok ${nOk}  failed ${nFail}  abandoned ${nAbandoned}`
-    : `settled ${done.length}  ok ${nOk}  failed ${nFail}  in-flight ${nFlight}`);
+    ? `run ${state.done.reason}  —  ok ${nOk}  failed ${nFail}  abandoned ${nAbandoned}${tokTotal}`
+    : `settled ${done.length}  ok ${nOk}  failed ${nFail}  in-flight ${nFlight}${tokTotal}`);
   return lines.map((l) => l.slice(0, w)).join('\n') + '\n';
 }

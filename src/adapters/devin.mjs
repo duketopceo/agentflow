@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { readFileSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnAgent as run, extractJson, probeBinary, withSchemaPrompt, batchResultMap } from './base.mjs';
 
@@ -51,6 +51,25 @@ function cloudAuth() {
 const errResult = (message, { code = null, timedOut = false, permissionDenied = false } = {}) =>
   ({ ok: false, error: { message, stderrTail: '', code, timedOut, permissionDenied } });
 
+// `--export` writes the session transcript including `final_metrics` (real
+// token counts) — the cost-monitor feed. Path is internal (`spec._export`,
+// not a script-facing opt); read after exit, deleted after read. Under
+// --sandbox the export write may be denied — usage just comes back null.
+// Captured on failures too: a runaway session is where spend hides.
+let exportCounter = 0;
+function readExportUsage(path) {
+  let fm = null;
+  try { fm = JSON.parse(readFileSync(path, 'utf8'))?.final_metrics; } catch { /* no/partial export */ }
+  try { rmSync(path, { force: true }); } catch { /* best effort */ }
+  if (!fm) return null;
+  return {
+    promptTokens: fm.total_prompt_tokens ?? null,
+    completionTokens: fm.total_completion_tokens ?? null,
+    cachedTokens: fm.total_cached_tokens ?? null,
+    steps: fm.total_steps ?? null,
+  };
+}
+
 async function apiFetch(path, { method = 'GET', body, signal, timeoutMs = 30_000, fetchImpl } = {}, auth) {
   const signals = [AbortSignal.timeout(timeoutMs)];
   if (signal) signals.push(signal);
@@ -90,12 +109,17 @@ export default {
     const argv = [this.bin, '-p', spec.prompt, '--respect-workspace-trust', 'false', '--permission-mode', PERMISSION_MAP[spec.permission] ?? 'smart'];
     if (spec.model) argv.push('--model', spec.model);
     if (spec.sandbox) argv.push('--sandbox');
+    if (spec._export) argv.push('--export', spec._export);
     return argv;
   },
 
   // No native structured-output flag: enforce schema via prompt, extract after.
   async spawnAgent(spec) {
-    return run(this, withSchemaPrompt(spec));
+    const exportPath = join(tmpdir(), `af-devin-${process.pid}-${exportCounter++}.json`);
+    const r = await run(this, { ...withSchemaPrompt(spec), _export: exportPath });
+    const usage = readExportUsage(exportPath);
+    if (usage) (r.ok ? r.result : r.error).usage = usage;
+    return r;
   },
 
   parse(r, spec) {

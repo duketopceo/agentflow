@@ -145,7 +145,21 @@ log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
     const loaded = Journal.load(Journal.pathFor(dir, Journal.list(dir)[0].runId));
     assert.equal(loaded.settled.size, 2);
     assert.equal(loaded.ended.reason, 'ok');
+    // --export capture: each call's final_metrics rides its agent record
+    // (and the result the script sees); load() sums the run total.
+    const rec = [...loaded.settled.values()][0];
+    assert.deepEqual(rec.result.usage, { promptTokens: 1234, completionTokens: 56, cachedTokens: 100, steps: 4 });
+    assert.equal(loaded.usage.calls, 2);
+    assert.equal(loaded.usage.promptTokens, 2468);
+    assert.equal(loaded.usage.completionTokens, 112);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('devin buildArgv emits --export only when spec._export is set', () => {
+  assert.ok(!devin.buildArgv({ prompt: 'x' }).includes('--export'));
+  const argv = devin.buildArgv({ prompt: 'x', _export: '/tmp/e.json' });
+  const i = argv.indexOf('--export');
+  assert.ok(i !== -1 && argv[i + 1] === '/tmp/e.json');
 });

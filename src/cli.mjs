@@ -161,6 +161,10 @@ async function statusCmd(cwd, runId, follow) {
     process.stdout.write(`run ${runId}  ${s.script ?? '?'}  harness=${s.harness ?? '?'}  at=${s.at ?? '?'}\n`);
     const cells = [...meta.settled.values()].map((r) => `${r.label}:${r.ok ? 'ok' : 'fail'}`);
     process.stdout.write(`settled=${meta.settled.size}${cells.length ? '  ' + cells.join('  ') : ''}\n`);
+    if (meta.usage.calls) {
+      const u = meta.usage;
+      process.stdout.write(`tokens in=${u.promptTokens} out=${u.completionTokens}${u.cachedTokens ? ` cached=${u.cachedTokens}` : ''} across ${u.calls} call${u.calls === 1 ? '' : 's'}\n`);
+    }
     if (meta.ended) {
       process.stdout.write(`ended: ${meta.ended.reason} at ${meta.ended.at}\n`);
       return endCode(meta.ended);

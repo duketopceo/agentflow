@@ -187,3 +187,16 @@ test('watch CLI: no arg resolves the newest journal in cwd', async () => {
     assert.match(out, /run started w\.mjs/);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
+
+test('renderFrame: per-lane + footer token totals from usage records', () => {
+  const s = foldState(recs([
+    { type: 'run-start', runId: 'r1', script: 'w.mjs', harness: 'devin', at: '2026-10-11T00:00:00.000Z' },
+    { type: 'agent', i: 0, label: 'a', ok: true, result: { text: 'x', usage: { promptTokens: 1000, completionTokens: 50 } }, elapsed: '1.0', at: '2026-10-11T00:00:03.000Z' },
+    { type: 'agent', i: 1, label: 'b', ok: false, error: { message: 'boom', usage: { promptTokens: 500, completionTokens: 10 } }, elapsed: '0.5', at: '2026-10-11T00:00:04.000Z' },
+    { type: 'run-end', reason: 'ok', at: '2026-10-11T00:00:05.000Z' },
+  ]));
+  const f = renderFrame(s, { now: Date.parse('2026-10-11T00:01:00.000Z'), width: 90, tick: 0 });
+  assert.match(f, /ok 1\.0s 1\.0k\/50/);
+  assert.match(f, /fail 0\.5s 500\/10/);
+  assert.match(f, /tok 1\.5k\/60/);
+});

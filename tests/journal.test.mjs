@@ -70,3 +70,17 @@ test('load tolerates corrupt lines', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('load aggregates per-call usage from result and error records', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'af-j-'));
+  try {
+    const j = Journal.create(dir, { runId: 'r2', script: 's.mjs', harness: 'devin' });
+    j.append({ type: 'agent', i: 0, ok: true, result: { text: 't', usage: { promptTokens: 1000, completionTokens: 50, cachedTokens: 200, steps: 3 } } });
+    j.append({ type: 'agent', i: 1, ok: false, error: { message: 'boom', usage: { promptTokens: 500, completionTokens: 10 } } });
+    j.append({ type: 'agent', i: 2, ok: true, result: { text: 'no usage' } });
+    const u = Journal.load(j.path).usage;
+    assert.deepEqual(u, { promptTokens: 1500, completionTokens: 60, cachedTokens: 200, steps: 3, calls: 2 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

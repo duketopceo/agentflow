@@ -47,7 +47,7 @@ replays settled results and re-runs only what never finished.
 
 | Global | Signature | Notes |
 |---|---|---|
-| `agent` | `(prompt, opts?) => Promise<{text, json} \| null>` | opts: `label`, `model`, `schema`, `worktree`, `cwd`, `timeout` (ms), `permission`, `retries` |
+| `agent` | `(prompt, opts?) => Promise<{text, json, usage?} \| null>` | opts: `label`, `model`, `schema`, `worktree`, `cwd`, `timeout` (ms), `permission`, `retries`. `usage` is `{promptTokens, completionTokens, cachedTokens, steps}` when the harness reports it — **devin only** today (from `--export` final_metrics); also journaled and summed by `status`/`watch` |
 | `parallel` | `(thunks) => Promise<results>` | `parallel(files.map(f => () => agent(...)))` — order preserved, `null` per failure |
 | `pipeline` | `(items, ...stages) => Promise<results>` | each item flows through stages; `null` short-circuits that item |
 | `batch` | `(items, opts?) => Promise<results>` | async fan-out on **openrouter** (one OR Batch job per N prompts, ~40–60% off, ≤24h window), **devin** (N cloud sessions — `devin_mode` model, `structured_output` collected; swe-2 models are free), **perplexity** (N `/v1/async/sonar` requests — async accepts **`sonar-deep-research` only**), **openai** (Batches API, ~50% off, 24h) or **anthropic** (Message Batches, ~50% off, 24h). Items: `{prompt, label?, model?, schema?, maxTokens?}`; all share ONE model (`opts.model` or per-item). opts: `batchPollMs` (15s), `batchTimeoutMs` (2h). Results align to input order; each item consumes a normal call index |
@@ -152,9 +152,31 @@ Never retried: `permissionDenied` and `timedOut`. All three settable in
 keeps running, output in `.agentflow/runs/<id>.log`). `agentflow status <id>`
 prints settled/total + outcome (exit 2 while running), `agentflow tail <id>`
 streams journal events until run-end, and `agentflow watch [id]` renders a
-live per-lane terminal view (in-flight spinners, batch poll progress; falls
-back to `tail` output when piped). Use detach for long fan-outs and check
-back — same model as Claude's detached Workflow.
+live per-lane terminal view (in-flight spinners, batch poll progress,
+per-call tokens; falls back to `tail` output when piped). Use detach for
+long fan-outs and check back — same model as Claude's detached Workflow.
+
+## Autonomous operation
+
+A launched run needs no babysitting — the runner owns the pool, retries,
+SIGINT drain, and journaling. Your job is the loop around it:
+
+1. **Launch** with `--detach` for anything longer than a few calls; keep the
+   run-id it prints.
+2. **Monitor** with `watch <id>` (TTY) or `status <id>` (scripts) — token
+   totals accumulate per call on devin so spend is visible mid-run.
+3. **Heal**: interrupted or partially failed runs resume exactly —
+   `agentflow run w.mjs --resume <id> --harness <same>` replays settled
+   work and re-runs only the gaps; mid-poll batch interrupts re-poll the
+   journaled batch id, never resubmit. A `null` slot in results is a failed
+   call — count it, retry the script with `--resume` if it matters, don't
+   panic-rerun everything.
+4. **Report** the synthesis + `run <id>` (journal keeps prompt/result text;
+   `status`/`watch` keep totals).
+
+Don't re-orchestrate per-call in your own context — that's the thing
+agentflow exists to remove. If a stage needs a decision from you, gate it
+between two `run` invocations, not inside the workflow.
 
 `agentflow stop <id>` SIGTERMs the journaled pid only when it verifies as the
 run's own process (agentflow cmdline + start time matching the journal — a

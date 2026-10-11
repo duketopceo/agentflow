@@ -1,5 +1,12 @@
 #!/usr/bin/env node
+import { writeFileSync } from 'node:fs';
 import { main, wantsSchema, FENCED } from './lib.mjs';
 await main(process.argv.slice(2), (argv) => {
+  const ei = argv.findIndex((a) => a === '--export');
+  if (ei !== -1 && argv[ei + 1]) {
+    writeFileSync(argv[ei + 1], JSON.stringify({
+      final_metrics: { total_prompt_tokens: 1234, total_completion_tokens: 56, total_cached_tokens: 100, total_steps: 4 },
+    }));
+  }
   process.stdout.write((wantsSchema(argv) ? `Here:\n${FENCED}` : 'PONG') + '\n');
 }, { denyText: 'Error: workspace trust is required for this operation' });

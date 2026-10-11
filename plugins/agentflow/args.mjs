@@ -30,3 +30,24 @@ export function buildRunArgs({ script, harness, via, scriptArgs } = {}) {
 export function buildDoctorArgs() {
   return ['doctor'];
 }
+
+// Invoke the agentflow CLI and resolve { code, out }.
+//
+// out is the COMBINED stdout+stderr. The runner emits every operator-relevant
+// line — phase markers, per-lane results, the `[agentflow] run <id>` line, and
+// script log() output — on stderr, leaving stdout empty. A caller that reads
+// stdout alone gets "" and loses the run-id needed to resume or stop. Both
+// plugin arms call this so neither can regress into a stdout-only read.
+// On nonzero exit, out carries the stderr reason so the tool surfaces why the
+// run failed rather than a bare exit code.
+import { execFile } from 'node:child_process';
+
+export function runAgentflow(argv, { cwd, timeoutMs = 30 * 60_000, bin = 'agentflow' } = {}) {
+  return new Promise((resolve) => {
+    execFile(bin, argv, { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
+      const out = `${stdout}${stderr}`;
+      resolve({ code, out: out || `agentflow exited ${code}` });
+    });
+  });
+}

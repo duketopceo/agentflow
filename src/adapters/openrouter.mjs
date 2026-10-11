@@ -1,4 +1,5 @@
 import { extractJson, withSchemaPrompt, classifyFailure, batchResultMap } from './base.mjs';
+import { apiKey } from '../keyring.mjs';
 
 // Direct OpenRouter /chat/completions call — no subprocess, no agent loop, no
 // tools. The cheapest `agent()` surface: use for decompose/classify/verify/
@@ -36,8 +37,8 @@ export default {
   },
 
   async spawnAgent(spec) {
-    const key = process.env.OPENROUTER_API_KEY;
-    if (!key) return errResult('openrouter: OPENROUTER_API_KEY not set');
+    const key = await apiKey(process.env.OPENROUTER_API_KEY);
+    if (!key) return errResult('openrouter: OPENROUTER_API_KEY not set or omaseal:// ref unresolved');
     const s = withSchemaPrompt(spec);
     const signals = [AbortSignal.timeout(spec.timeout ?? 120_000)];
     if (spec.signal) signals.push(spec.signal);
@@ -71,8 +72,8 @@ export default {
   // request bodies (batchBody output); submit keys them c0..cN. Uniform
   // model is the caller's job (runtime checks before calling).
   async submitBatch(model, items, spec = {}) {
-    const key = process.env.OPENROUTER_API_KEY;
-    if (!key) return errResult('openrouter: OPENROUTER_API_KEY not set');
+    const key = await apiKey(process.env.OPENROUTER_API_KEY);
+    if (!key) return errResult('openrouter: OPENROUTER_API_KEY not set or omaseal:// ref unresolved');
     const requests = items.map((body, i) => ({ custom_id: `c${i}`, body }));
     let r, data;
     try {
@@ -98,8 +99,8 @@ export default {
   },
 
   async getBatch(id, spec = {}) {
-    const key = process.env.OPENROUTER_API_KEY;
-    if (!key) return errResult('openrouter: OPENROUTER_API_KEY not set');
+    const key = await apiKey(process.env.OPENROUTER_API_KEY);
+    if (!key) return errResult('openrouter: OPENROUTER_API_KEY not set or omaseal:// ref unresolved');
     let r, data;
     try {
       // 30s per poll request — a stalled connection becomes a transient poll
@@ -138,10 +139,10 @@ export default {
   },
 
   async probe() {
-    const ok = !!process.env.OPENROUTER_API_KEY;
+    const ok = !!(await apiKey(process.env.OPENROUTER_API_KEY));
     return {
       ok, name: 'openrouter', bin: null,
-      notes: [ok ? 'OPENROUTER_API_KEY set — direct /chat/completions + /batches, no tools' : 'OPENROUTER_API_KEY not set'],
+      notes: [ok ? 'OPENROUTER_API_KEY set — direct /chat/completions + /batches, no tools' : 'OPENROUTER_API_KEY not set (literal or omaseal:// ref)'],
     };
   },
 };

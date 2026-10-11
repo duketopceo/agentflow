@@ -45,3 +45,21 @@ under burst concurrency (5 of 12 calls) — the runner journals them as failed
 (`null`) and the workflow degrades gracefully, but cheap-model flakiness is
 real. A `retries` spec opt or automatic single-retry-on-empty is a candidate
 follow-up; `--cache` + `--resume` already bound re-run cost.
+
+## Batch API (2026-10-10, live OR, orchestral eval key)
+
+`agentflow run examples/batch-smoke.mjs --harness openrouter` — 3 prompts on
+`z-ai/glm-5.3-flash`, one `POST /batches` →
+`batch-1791675963-VjJrEK4aMNaT2nKflOy6` (202, `validating` → `in_progress`,
+24h window, model normalized to `glm-5.3-flash-20260826`).
+
+| Step | Result |
+|---|---|
+| submit + journal `batch` record | verified — `{batch_id, firstI:0, count:3, model, hash}` appended post-submit |
+| poll `in_progress` | verified — status passthrough correct |
+| SIGINT mid-poll → `--resume` | verified — `re-polling journaled batch batch-1791675963-...`, zero second POSTs |
+| `completed` → per-item results | deterministic-test verified; live completion pending — OR batch queue backlogged (glm 0/3 and deepseek-v4.1-flash 0/2 for >50min on 2026-10-10 evening) |
+
+Note for operators: OR batch turnaround on cheap flash slugs can exceed an
+hour in queue. `batch()` fits latency-tolerant stages only — keep
+`batchTimeoutMs` sized to your tolerance (default 2h; window is 24h).

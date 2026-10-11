@@ -11,6 +11,7 @@
     "./v2": "./v2.mjs"
   },
   "description": "agentflow runner tools for OpenCode (v1 default at ./v1.mjs; v2 arm at ./v2.mjs)",
+  "license": "AGPL-3.0-only",
   "peerDependencies": {
     "@opencode/plugin": ">=2.0.0",
     "@opencode-ai/plugin": ">=1.18.29"

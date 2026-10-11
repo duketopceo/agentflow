@@ -6,7 +6,7 @@
     "name": "Luke Kimball"
   },
   "repository": "https://github.com/duketopceo/agentflow",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "keywords": [
     "workflows",
     "orchestration",

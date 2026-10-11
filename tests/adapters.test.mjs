@@ -141,7 +141,7 @@ test('ori reasoningEffort emits native flag', () => {
 });
 
 test('adapter registry exposes all harnesses', () => {
-  assert.deepEqual(Object.keys(adapters).sort(), ['claude', 'codex', 'devin', 'echo', 'opencode', 'openrouter', 'ori']);
+  assert.deepEqual(Object.keys(adapters).sort(), ['anthropic', 'claude', 'codex', 'devin', 'echo', 'openai', 'opencode', 'openrouter', 'ori']);
 });
 
 test('probeBinary reports missing binary without throwing', async () => {

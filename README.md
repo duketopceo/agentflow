@@ -29,9 +29,10 @@ const good = results.filter(Boolean);
 
 Globals inside a script: `agent()`, `parallel()`, `pipeline()`, `batch()`,
 `phase()`, `log()`, `args`. `batch()` fans out through the harness's async
-surface — one OR Batch job on `--harness openrouter` (~40–60% cheaper), or
+surface — one OR Batch job on `--harness openrouter` (~40–60% cheaper),
 one Devin Cloud session per item on `--harness devin` (`swe-2` models are
-free). Results align to input order; resumable mid-poll.
+free), or first-party batch APIs on `--harness openai`/`--harness anthropic`
+(~50% off, 24h window). Results align to input order; resumable mid-poll.
 
 ## Install as an agent plugin
 

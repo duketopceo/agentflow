@@ -81,3 +81,21 @@ the composite id (3 session ids), then 3 `agent` records at indices 0–2.
 Operator note: a Devin session idles at `waiting_for_user` after producing
 `structured_output` — completion is output-present, not status-terminal.
 Sessions also carry `max_acu_limit`; swe-2 models observed consuming 0.0.
+
+## Batch on openai + anthropic (2026-10-11, deterministic only)
+
+`batch()` on `--harness openai` (two-step `/v1/files` JSONL upload +
+`/v1/batches` create, `output_file_id` results) and `--harness anthropic`
+(one `POST /v1/messages/batches`, `ended` → `results_url` JSONL). Both
+verified entirely by fake-fetch unit + runtime e2e tests — **live runs
+deferred behind the no-spend human gate**. Wire shapes pinned to the
+documented APIs; verify-at-implement-time items (multipart field names,
+anthropic beta header, model slugs) are listed in the adapter comments
+and plan KTD4.
+
+| Surface | Verified (deterministic) | Live |
+|---|---|---|
+| openai `agent()` | text/json extraction, headers, 401→permissionDenied | deferred — no-spend gate |
+| openai `batch()` | 2-call submit, aligned results, resume re-poll, per-item errors | deferred — no-spend gate |
+| anthropic `agent()` | text-block join, `max_tokens` default/override, headers | deferred — no-spend gate |
+| anthropic `batch()` | 1-call submit, `ended`→`completed`, results_url JSONL, per-item errors | deferred — no-spend gate |

@@ -7,8 +7,11 @@ matches your OpenCode.
 
 | Your OpenCode | Entry | Install |
 |---|---|---|
-| **v1, `1.18.29+`** | `plugins/agentflow/v1.ts` (`server()`) | `opencode plugin github:duketopceo/agentflow` |
-| **v2 (`2.x`)** | `plugins/agentflow/v2.ts` (`Plugin.define`) | `opencode plugin add 'github:duketopceo/agentflow#main::path:plugins/agentflow'` |
+| **v1, `1.18.29+`** | `plugins/agentflow/v1.mjs` (`server()`) | `opencode plugin github:duketopceo/agentflow` |
+| **v2 (`2.x`)** | `plugins/agentflow/v2.mjs` (`Plugin.define`) | `opencode plugin github:duketopceo/agentflow#main::path:plugins/agentflow` |
+
+There is no `opencode plugin add` subcommand — the only verb is
+`opencode plugin <module>`, and `add` is parsed as the module name.
 
 The v1 entry requires `1.18.29` or newer (the release where object entrypoints
 were added). On older v1 releases the `server` entry is not read.
@@ -19,10 +22,10 @@ Requires Node.js >= 20 and `agentflow` on PATH (repo `bin/agentflow`, or
 `npm link` inside the repo).
 
 > **v2 status:** the v2 entry is exercised in the test suite (it registers both
-> tools against a real `ctx.tool`), but **not yet on a live v2 install** — no
+> tools against a `ToolDomain`), but **not yet on a live v2 install** — no
 > v2 CLI is published yet (latest `opencode-ai` is `1.19.0`). The v1 entry is
-> verified working. After a v2 release, confirm with `opencode plugin list` and
-> an `agentflow_doctor` call.
+> verified working. After a v2 release, confirm the plugin loads and that an
+> `agentflow_doctor` call returns probe output.
 
 ## Reading a run's output
 

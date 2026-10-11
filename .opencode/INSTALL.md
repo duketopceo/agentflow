@@ -1,22 +1,26 @@
 # Installing Agentflow for OpenCode
 
-## Native plugin (recommended)
-
-This repo ships a real opencode plugin at `.opencode/plugins/agentflow.ts`
-— it exposes `agentflow_run` and `agentflow_doctor` tools.
-
-```bash
-opencode plugin file:/path/to/agentflow
-# or from git:
-opencode plugin github:duketopceo/agentflow
-```
-
-(`opencode plugin add …` is wrong for current opencode — `add` is parsed as
-the module name. The bare `opencode plugin <module>` form resolves the
-`exports["./server"]` entrypoint in `package.json`.)
+Requires **OpenCode v2** (`opencode >= 2.x`) — the plugin lives at
+`plugins/agentflow/` and uses `Plugin.define` + `ctx.tool.transform` from
+`@opencode/plugin`. v1 plugin code is not supported.
 
 Requires Node.js >= 20 and `agentflow` on PATH (repo `bin/agentflow`, or
 `npm link` inside the repo).
+
+```bash
+# package plugin from git:
+opencode plugin add 'github:duketopceo/agentflow#main::path:plugins/agentflow'
+
+# or project-local — add to opencode.jsonc:
+{ "plugins": ["/path/to/agentflow/plugins/agentflow"] }
+```
+
+Tools exposed: `agentflow_run`, `agentflow_doctor`.
+
+**Status:** written against the v2 plugin docs — **not yet exercised on a
+live v2 install** (v2 is not on npm yet; latest published is `1.19.0`).
+After upgrading, verify with `opencode plugin list` and an
+`agentflow_doctor` call.
 
 ## Skill only (minimal)
 

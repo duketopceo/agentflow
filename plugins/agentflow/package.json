@@ -1,0 +1,11 @@
+{
+  "name": "agentflow-opencode-plugin",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "description": "agentflow runner tools for OpenCode v2",
+  "peerDependencies": {
+    "@opencode/plugin": "*"
+  }
+}

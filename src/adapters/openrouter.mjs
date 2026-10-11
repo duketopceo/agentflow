@@ -76,11 +76,13 @@ export default {
     const requests = items.map((body, i) => ({ custom_id: `c${i}`, body }));
     let r, data;
     try {
+      const signals = [AbortSignal.timeout(60_000)];
+      if (spec.signal) signals.push(spec.signal);
       r = await (spec.fetchImpl ?? fetch)(BATCH_URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint: '/v1/chat/completions', model, requests }),
-        signal: spec.signal,
+        signal: AbortSignal.any(signals),
       });
       data = await r.json().catch(() => null);
     } catch (e) {
@@ -100,9 +102,13 @@ export default {
     if (!key) return errResult('openrouter: OPENROUTER_API_KEY not set');
     let r, data;
     try {
+      // 30s per poll request — a stalled connection becomes a transient poll
+      // failure the runtime retries, not a hang that outlives the deadline.
+      const signals = [AbortSignal.timeout(30_000)];
+      if (spec.signal) signals.push(spec.signal);
       r = await (spec.fetchImpl ?? fetch)(`${BATCH_URL}/${encodeURIComponent(id)}`, {
         headers: { Authorization: `Bearer ${key}` },
-        signal: spec.signal,
+        signal: AbortSignal.any(signals),
       });
       data = await r.json().catch(() => null);
     } catch (e) {

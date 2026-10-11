@@ -12,6 +12,8 @@ import { Journal } from '../src/journal.mjs';
 import openrouter from '../src/adapters/openrouter.mjs';
 import devin from '../src/adapters/devin.mjs';
 import perplexity from '../src/adapters/perplexity.mjs';
+import openai from '../src/adapters/openai.mjs';
+import anthropic from '../src/adapters/anthropic.mjs';
 import echo from '../src/adapters/echo.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -42,9 +44,13 @@ function fixture() {
 function stubFetch(queue) {
   const calls = [];
   const fetchImpl = async (url, opts = {}) => {
-    calls.push({ url, method: opts.method ?? 'GET', body: opts.body ? JSON.parse(opts.body) : null, headers: opts.headers ?? {} });
+    let body = opts.body ?? null;
+    if (body instanceof FormData) {
+      body = { __formData: true, purpose: opts.body.get('purpose') }; // openai file upload
+    } else if (typeof body === 'string') body = JSON.parse(body);
+    calls.push({ url, method: opts.method ?? 'GET', body, headers: opts.headers ?? {} });
     const next = queue.length ? queue.shift() : { status: 500, data: { error: { message: 'unstubbed call' } } };
-    return { ok: next.status < 300, status: next.status, json: async () => next.data };
+    return { ok: next.status < 300, status: next.status, json: async () => next.data, text: async () => next.text ?? JSON.stringify(next.data) };
   };
   return { calls, fetchImpl };
 }
@@ -511,5 +517,156 @@ log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
     assert.deepEqual(f.lastResult(), ['A', null]);
     const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
     assert.match(loaded.settled.get(1).error.message, /content filter/);
+  } finally { f.cleanup(); }
+}));
+// --- openai / anthropic (direct-API batch adapters — deterministic only) ---
+
+function withOpenAI(fn) {
+  return async () => {
+    process.env.OPENAI_API_KEY = 'sk-test';
+    try { await fn(); } finally { delete process.env.OPENAI_API_KEY; }
+  };
+}
+function withAnthropic(fn) {
+  return async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+    try { await fn(); } finally { delete process.env.ANTHROPIC_API_KEY; }
+  };
+}
+
+const openaiOut = (texts) => texts.map((t, i) => JSON.stringify(
+  t == null
+    ? { custom_id: `c${i}`, error: { code: 'server_error', message: 'upstream blew up' } }
+    : { custom_id: `c${i}`, response: { status_code: 200, body: { choices: [{ message: { content: t } }] } } },
+)).join('\n');
+
+const anthropicOut = (texts) => texts.map((t, i) => JSON.stringify(
+  t == null
+    ? { custom_id: `c${i}`, result: { type: 'errored', error: { message: 'item blew up' } } }
+    : { custom_id: `c${i}`, result: { type: 'succeeded', message: { content: [{ type: 'text', text: t }] } } },
+)).join('\n');
+
+test('openai batch: two-step submit, aligned results, journal records', withOpenAI(async () => {
+  const f = fixture();
+  try {
+    const stub = stubFetch([
+      { status: 200, data: { id: 'file-1' } },
+      { status: 200, data: { id: 'batch_1', status: 'validating' } },
+      { status: 200, data: { status: 'completed', output_file_id: 'file-o', request_counts: { total: 2, completed: 2, failed: 0 } } },
+      { status: 200, text: openaiOut(['A', 'B']) },
+    ]);
+    f.writeScript(`const r = await batch([{prompt:'p0',label:'x0'},{prompt:'p1',label:'x1'}], {model:'gpt-4.1-mini'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const res = await f.run({ adapter: openai, fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', 'B']);
+    assert.deepEqual(stub.calls.map((c) => c.method), ['POST', 'POST', 'GET', 'GET']);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.equal(loaded.batches.length, 1);
+    assert.equal(loaded.batches[0].batch_id, 'batch_1');
+    assert.equal(loaded.settled.get(0).result.text, 'A');
+  } finally { f.cleanup(); }
+}));
+
+test('openai batch: resume re-polls journaled batch_id — never resubmits', withOpenAI(async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'}], {model:'gpt-4.1-mini'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const bodies = [{ prompt: 'p0' }, { prompt: 'p1' }].map((s) => openai.batchBody({ ...s, model: 'gpt-4.1-mini' }));
+    const hash = createHash('sha256').update(JSON.stringify({ model: 'gpt-4.1-mini', bodies })).digest('hex').slice(0, 16);
+    const prior = Journal.create(f.dir, { runId: 'run-o', script: 'w.mjs', harness: 'openai' });
+    prior.append({ type: 'batch', batch_id: 'batch_old', firstI: 0, count: 2, model: 'gpt-4.1-mini', hash });
+    prior.append({ type: 'run-end', reason: 'interrupted' });
+
+    const stub = stubFetch([
+      { status: 200, data: { status: 'completed', output_file_id: 'file-o', request_counts: { total: 2, completed: 2, failed: 0 } } },
+      { status: 200, text: openaiOut(['A', 'B']) },
+    ]);
+    const res = await f.run({ adapter: openai, resumeId: 'run-o', fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', 'B']);
+    assert.equal(stub.calls.filter((c) => c.method === 'POST').length, 0); // zero resubmits
+    assert.equal(stub.calls[0].url.includes('batch_old'), true);
+  } finally { f.cleanup(); }
+}));
+
+test('openai batch: per-item error settles only that index', withOpenAI(async () => {
+  const f = fixture();
+  try {
+    const stub = stubFetch([
+      { status: 200, data: { id: 'file-1' } },
+      { status: 200, data: { id: 'batch_1', status: 'validating' } },
+      { status: 200, data: { status: 'completed', output_file_id: 'file-o', request_counts: { total: 2, completed: 1, failed: 1 } } },
+      { status: 200, text: openaiOut(['A', null]) },
+    ]);
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'}], {model:'gpt-4.1-mini'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const res = await f.run({ adapter: openai, fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', null]);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.match(loaded.settled.get(1).error.message, /upstream blew up/);
+  } finally { f.cleanup(); }
+}));
+
+test('anthropic batch: one-call submit, ended->completed, aligned results', withAnthropic(async () => {
+  const f = fixture();
+  try {
+    const stub = stubFetch([
+      { status: 200, data: { id: 'msgbatch_1', processing_status: 'in_progress' } },
+      { status: 200, data: { processing_status: 'ended', results_url: 'http://stub/results', request_counts: { processing: 0, succeeded: 2, errored: 0, expired: 0, canceled: 0 } } },
+      { status: 200, text: anthropicOut(['A', 'B']) },
+    ]);
+    f.writeScript(`const r = await batch([{prompt:'p0',label:'x0'},{prompt:'p1',label:'x1'}], {model:'claude-haiku-4-5'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const res = await f.run({ adapter: anthropic, fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', 'B']);
+    assert.deepEqual(stub.calls.map((c) => c.method), ['POST', 'GET', 'GET']);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.equal(loaded.batches[0].batch_id, 'msgbatch_1');
+    assert.equal(loaded.settled.get(1).result.text, 'B');
+  } finally { f.cleanup(); }
+}));
+
+test('anthropic batch: resume re-polls journaled batch_id — never resubmits', withAnthropic(async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'}], {model:'claude-haiku-4-5'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const bodies = [{ prompt: 'p0' }, { prompt: 'p1' }].map((s) => anthropic.batchBody({ ...s, model: 'claude-haiku-4-5' }));
+    const hash = createHash('sha256').update(JSON.stringify({ model: 'claude-haiku-4-5', bodies })).digest('hex').slice(0, 16);
+    const prior = Journal.create(f.dir, { runId: 'run-a', script: 'w.mjs', harness: 'anthropic' });
+    prior.append({ type: 'batch', batch_id: 'msgbatch_old', firstI: 0, count: 2, model: 'claude-haiku-4-5', hash });
+    prior.append({ type: 'run-end', reason: 'interrupted' });
+
+    const stub = stubFetch([
+      { status: 200, data: { processing_status: 'ended', results_url: 'http://stub/results', request_counts: { processing: 0, succeeded: 2, errored: 0, expired: 0, canceled: 0 } } },
+      { status: 200, text: anthropicOut(['A', 'B']) },
+    ]);
+    const res = await f.run({ adapter: anthropic, resumeId: 'run-a', fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', 'B']);
+    assert.equal(stub.calls.filter((c) => c.method === 'POST').length, 0);
+    assert.equal(stub.calls[0].url.includes('msgbatch_old'), true);
+  } finally { f.cleanup(); }
+}));
+
+test('anthropic batch: per-item errored settles only that index', withAnthropic(async () => {
+  const f = fixture();
+  try {
+    const stub = stubFetch([
+      { status: 200, data: { id: 'msgbatch_1', processing_status: 'in_progress' } },
+      { status: 200, data: { processing_status: 'ended', results_url: 'http://stub/results', request_counts: { processing: 0, succeeded: 1, errored: 1, expired: 0, canceled: 0 } } },
+      { status: 200, text: anthropicOut(['A', null]) },
+    ]);
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'}], {model:'claude-haiku-4-5'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const res = await f.run({ adapter: anthropic, fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', null]);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.match(loaded.settled.get(1).error.message, /item blew up/);
   } finally { f.cleanup(); }
 }));

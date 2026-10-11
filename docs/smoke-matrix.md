@@ -105,3 +105,20 @@ sonar-deep-research". That is the right batch model anyway (long cited
 reports ~1–4min each); use `sonar`/`sonar-pro` for sync `agent()` calls.
 Sonar async is slated for deprecation 2026-09-27 — Agent API
 `/v1/responses` (same submit/retrieve shape) is the migration path.
+## Batch on openai + anthropic (2026-10-11, deterministic only)
+
+`batch()` on `--harness openai` (two-step `/v1/files` JSONL upload +
+`/v1/batches` create, `output_file_id` results) and `--harness anthropic`
+(one `POST /v1/messages/batches`, `ended` → `results_url` JSONL). Both
+verified entirely by fake-fetch unit + runtime e2e tests — **live runs
+deferred behind the no-spend human gate**. Wire shapes pinned to the
+documented APIs; verify-at-implement-time items (multipart field names,
+anthropic beta header, model slugs) are listed in the adapter comments
+and plan KTD4.
+
+| Surface | Verified (deterministic) | Live |
+|---|---|---|
+| openai `agent()` | text/json extraction, headers, 401→permissionDenied | deferred — no-spend gate |
+| openai `batch()` | 2-call submit, aligned results, resume re-poll, per-item errors | deferred — no-spend gate |
+| anthropic `agent()` | text-block join, `max_tokens` default/override, headers | deferred — no-spend gate |
+| anthropic `batch()` | 1-call submit, `ended`→`completed`, results_url JSONL, per-item errors | deferred — no-spend gate |

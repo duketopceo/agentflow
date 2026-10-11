@@ -31,9 +31,10 @@ Globals inside a script: `agent()`, `parallel()`, `pipeline()`, `batch()`,
 `phase()`, `log()`, `args`. `batch()` fans out through the harness's async
 surface — one OR Batch job on `--harness openrouter` (~40–60% cheaper),
 one Devin Cloud session per item on `--harness devin` (`swe-2` models are
-free), or one async sonar request per item on `--harness perplexity`
-(grounded, cited answers — the research surface). Results align to input
-order; resumable mid-poll.
+free), one async sonar request per item on `--harness perplexity`
+(grounded, cited answers — the research surface), or first-party batch APIs
+on `--harness openai`/`--harness anthropic` (~50% off, 24h window). Results
+align to input order; resumable mid-poll.
 
 ## Watching a run
 

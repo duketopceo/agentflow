@@ -50,7 +50,7 @@ replays settled results and re-runs only what never finished.
 | `agent` | `(prompt, opts?) => Promise<{text, json} \| null>` | opts: `label`, `model`, `schema`, `worktree`, `cwd`, `timeout` (ms), `permission`, `retries` |
 | `parallel` | `(thunks) => Promise<results>` | `parallel(files.map(f => () => agent(...)))` — order preserved, `null` per failure |
 | `pipeline` | `(items, ...stages) => Promise<results>` | each item flows through stages; `null` short-circuits that item |
-| `batch` | `(items, opts?) => Promise<results>` | async fan-out on **openrouter** (one OR Batch job per N prompts, ~40–60% off, ≤24h window), **devin** (N cloud sessions — `devin_mode` model, `structured_output` collected; swe-2 models are free), or **perplexity** (N `/v1/async/sonar` requests — async accepts **`sonar-deep-research` only**). Items: `{prompt, label?, model?, schema?}`; all share ONE model (`opts.model` or per-item). opts: `batchPollMs` (15s), `batchTimeoutMs` (2h). Results align to input order; each item consumes a normal call index |
+| `batch` | `(items, opts?) => Promise<results>` | async fan-out on **openrouter** (one OR Batch job per N prompts, ~40–60% off, ≤24h window), **devin** (N cloud sessions — `devin_mode` model, `structured_output` collected; swe-2 models are free), **perplexity** (N `/v1/async/sonar` requests — async accepts **`sonar-deep-research` only**), **openai** (Batches API, ~50% off, 24h) or **anthropic** (Message Batches, ~50% off, 24h). Items: `{prompt, label?, model?, schema?, maxTokens?}`; all share ONE model (`opts.model` or per-item). opts: `batchPollMs` (15s), `batchTimeoutMs` (2h). Results align to input order; each item consumes a normal call index |
 | `phase` | `(name) => void` | labels stderr progress |
 | `log` | `(msg) => void` | stderr; keep secrets out |
 | `args` | array | args after `--` on the CLI |
@@ -78,6 +78,8 @@ Constraints:
 | `ori` | `ori code -p` | `--model <openrouter-slug>` — any model on OpenRouter | prompt-level | no | `self-drive` (binary approval surface; `manual` stalls headless) |
 | `openrouter` | in-process `POST /chat/completions` — **no subprocess, no tools** | OR slug (default `z-ai/glm-5.3-flash`) | prompt-level | n/a | n/a — needs `OPENROUTER_API_KEY` in env |
 | `perplexity` | in-process `POST /chat/completions` — grounded answers + `citations` | `sonar` (default), `sonar-pro`; **batch: `sonar-deep-research` only** | prompt-level | n/a | n/a — needs `PERPLEXITY_API_KEY` in env |
+| `openai` | in-process `POST /v1/chat/completions` — **no subprocess, no tools** | OpenAI slug (default `gpt-4.1-mini`) | prompt-level | n/a | n/a — needs `OPENAI_API_KEY` in env |
+| `anthropic` | in-process `POST /v1/messages` — **no subprocess, no tools** | Anthropic slug (default `claude-haiku-4-5`) | prompt-level | n/a | n/a — needs `ANTHROPIC_API_KEY` in env |
 | `echo` | none (test adapter) | — | canned | — | — |
 
 `openrouter` is the cheapest surface — use it for tool-free stages
@@ -90,7 +92,10 @@ journaled ids, never resubmits). On openrouter that's one `/batches` job
 (`structured_output` is the result channel, sessions idle at
 `waiting_for_user` once produced — that is the completion signal); on
 perplexity it's one async sonar request per item (`COMPLETED` + `response`
-— grounded answers carry `citations` through to the result).
+— grounded answers carry `citations` through to the result); on
+openai it's a JSONL file upload + one `/v1/batches` job; on anthropic one
+`/v1/messages/batches` call (`max_tokens` required — default 8192, per-item
+`maxTokens` overrides).
 
 **`--via ori`** wraps workers in Ori's OpenRouter environment
 (`ori claude -p ...`) — the harness keeps its own flags and parsing, but

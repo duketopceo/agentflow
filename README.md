@@ -69,7 +69,11 @@ The repo carries a manifest for each harness; all resolve to the shared
 | Devin | `devin plugins install -y duketopceo/agentflow` (or `--local /path/to/agentflow`) — reads `.devin-plugin/`; auto-installs the compound-engineering plugin via `requiredPlugins` |
 | Claude Code | `claude plugin marketplace add duketopceo/agentflow` → `.claude-plugin/` — though inside Claude, prefer the native Workflow tool |
 | Codex | `codex plugin marketplace add duketopceo/agentflow` → `.codex-plugin/` |
-| OpenCode | v1 `1.18.29+`: `opencode plugin github:duketopceo/agentflow` → `plugins/agentflow/v1.mjs`. v2: `opencode plugin github:duketopceo/agentflow#main::path:plugins/agentflow` → `v2.mjs` (not yet on a live install). Both expose `agentflow_run`/`agentflow_doctor`. See `.opencode/INSTALL.md` |
+| OpenCode | v1 `1.18.29+`: `opencode plugin github:duketopceo/agentflow` → `plugins/agentflow/v1.mjs` (live-verified). v2: `opencode plugin github:duketopceo/agentflow#main::path:plugins/agentflow` → `v2.mjs` (no v2 CLI published yet). Both expose `agentflow_run`/`agentflow_doctor`. See `.opencode/INSTALL.md` |
+| Factory Droid | `droid plugin marketplace add duketopceo/agentflow` — `.factory-plugin/` native (`.claude-plugin/` also auto-translates); ships the `worker` droid |
+| Copilot CLI | `copilot plugin install duketopceo/agentflow` — root `plugin.json` (Agent Plugins 1.0) |
+| Cursor | `.cursor-plugin/` native; submit listing via cursor.directory or cursor.com/marketplace/publish — root `plugin.json` also covers the open standard |
+| Gemini CLI | `gemini extensions install https://github.com/duketopceo/agentflow` — `gemini-extension.json` loads the skill as context |
 | Ori/OpenRouter/Perplexity | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` / `--harness perplexity` or `--via ori` |
 
 <sub>Install rows verified from a scratch HOME on 2026-10-10 against the
@@ -162,6 +166,7 @@ checkout; `clean` reclaims them after the run ends.
 - `docs/plans/` — design history and the [program roadmap](docs/plans/2026-10-10-005-feat-program-roadmap-plan.md)
 - `docs/smoke-matrix.md` — live per-adapter verification results (`scripts/smoke-harnesses.mjs` reproduces)
 - `docs/research/` — cross-harness landscape + orchestration economics; start with `2026-10-10-landscape.md`
+- `docs/publish-matrix.md` — per-harness distribution surfaces and publish paths
 - `DESIGN.md` and `assets/brand/` — design direction and logo proposal
 
 ## Status

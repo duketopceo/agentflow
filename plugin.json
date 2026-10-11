@@ -1,4 +1,5 @@
 {
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "agentflow",
   "version": "0.2.0",
   "description": "Cross-harness dynamic workflows: script-driven multi-agent orchestration for devin, claude, codex, opencode",
@@ -13,5 +14,6 @@
     "multi-agent",
     "parallel-agents",
     "agent-harness"
-  ]
+  ],
+  "skills": "./skills/"
 }

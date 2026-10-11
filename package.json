@@ -35,6 +35,10 @@
     ".codex-plugin",
     ".agents",
     "plugins",
+    ".cursor-plugin",
+    ".factory-plugin",
+    "droids",
+    "gemini-extension.json",
     ".opencode",
     "README.md",
     "LICENSE"

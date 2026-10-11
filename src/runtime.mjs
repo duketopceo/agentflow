@@ -107,11 +107,6 @@ export async function runScript(opts) {
     fetchImpl = undefined,
     sleep: sleepImpl = undefined,
     err = (s) => process.stderr.write(s + '\n'),
-    // Test seam: injected sleep removes wall-clock retry backoff from the
-    // suite. Deliberately NOT used by the signal-drain loop below — a poll's
-    // sleep IS its interval, and an instant injected sleep would spin the
-    // event loop and starve the I/O that clears in-flight work.
-    sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   } = opts;
 
   const scriptName = basename(scriptPath);
@@ -155,8 +150,11 @@ export async function runScript(opts) {
 
   const pool = new Pool(concurrency);
   const abort = new AbortController();
-  // Test seam + abort-aware sleep for batch polling: tests inject an instant
-  // sleep; the default resolves early when the run aborts (SIGINT drain).
+  // Test seam + abort-aware sleep: tests inject an instant sleep; the default
+  // resolves early when the run aborts (SIGINT drain). Deliberately NOT used
+  // by the signal-drain loop below — a poll's sleep IS its interval, and an
+  // instant injected sleep would spin the event loop and starve the I/O that
+  // clears in-flight work.
   const sleep = sleepImpl ?? ((ms) => new Promise((r) => {
     const t = setTimeout(r, ms);
     abort.signal.addEventListener('abort', () => { clearTimeout(t); r(); }, { once: true });

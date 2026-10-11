@@ -16,7 +16,7 @@ import { tool } from "@opencode-ai/plugin";
 import {
   RUN_DESCRIPTION, DOCTOR_DESCRIPTION, HARNESS_DESCRIPTION, VIA_DESCRIPTION,
   SCRIPT_DESCRIPTION, SCRIPT_ARGS_DESCRIPTION,
-  buildRunArgs, buildDoctorArgs, runAgentflow,
+  buildRunArgs, buildDoctorArgs, runAgentflow, toolOutcome,
 } from "./args.mjs";
 
 export default {
@@ -37,14 +37,12 @@ export default {
           // shipped before read stdout only, so every successful run returned
           // "" and the caller lost the run-id — the regression these tests pin.
           //
-          // A failed run THROWS rather than returning its text: neither SDK
-          // exposes an error channel in a tool result, so a returned string is
-          // recorded as a successful call. The runner's own failure reason is
-          // carried in the thrown message.
+          // A failed run THROWS (see toolOutcome) rather than returning its
+          // text: neither SDK exposes an error channel in a tool result, so a
+          // returned string would be recorded as a successful call.
           async execute(args) {
             const r = await runAgentflow(buildRunArgs(args), { cwd });
-            if (r.code !== 0) throw new Error(r.out);
-            return r.out;
+            return toolOutcome(r).content;
           },
         }),
         agentflow_doctor: tool({
@@ -52,8 +50,7 @@ export default {
           args: {},
           async execute() {
             const r = await runAgentflow(buildDoctorArgs(), { cwd });
-            if (r.code !== 0) throw new Error(r.out);
-            return r.out;
+            return toolOutcome(r).content;
           },
         }),
       },

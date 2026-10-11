@@ -78,12 +78,10 @@ test('runAgentflow: nonzero exit surfaces the stderr reason, not a bare code', a
   );
   assert.equal(code, 3);
   assert.match(out, /script failed with reason FAKED/, 'failure reason must be visible');
-  assert.doesNotMatch(out, /^\s*$/, 'output must not be blank on failure');
 });
 
 test('runAgentflow: argv reaches the stub in the documented order', async () => {
-  const file = join(tmpdir(), `af-argv-${process.pid}.txt`);
-  const argvFile = file;
+  const argvFile = join(tmpdir(), `af-argv-${process.pid}.txt`);
   await withFakebin(
     () => runAgentflow(
       buildRunArgs({ script: 'w.mjs', harness: 'devin', via: 'ori', scriptArgs: 'q' }),

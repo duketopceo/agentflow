@@ -121,8 +121,10 @@ export default {
       }
       return { custom_id: cid, pending: true }; // CREATED / IN_PROGRESS / unknown
     }));
-    if (results.some((x) => x.pending)) return { ok: true, status: 'in_progress', results: null };
-    return { ok: true, status: 'completed', results: results.map(({ custom_id, result }) => ({ custom_id, result })) };
+    const settled = results.filter((x) => !x.pending).length;
+    const counts = { pending: results.length - settled, settled, total: results.length };
+    if (results.some((x) => x.pending)) return { ok: true, status: 'in_progress', results: null, counts };
+    return { ok: true, status: 'completed', counts, results: results.map(({ custom_id, result }) => ({ custom_id, result })) };
   },
 
   batchResultMap(results) {

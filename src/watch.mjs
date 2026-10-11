@@ -145,9 +145,9 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
     // The payoff: total spend, large. costUsd wins when a harness reports
     // dollars (claude); tokens are the spend proxy everywhere else.
     if (tot.usd) {
-      lines.push('', bigNumber(`$${tot.usd.toFixed(2)}`), '     total spend');
+      lines.push('', ...bigNumber(`$${tot.usd.toFixed(2)}`).split('\n'), '     total spend');
     } else if (tot.n) {
-      lines.push('', bigNumber(fmtTok(tot.p + tot.c)), '     total tokens (in+out)');
+      lines.push('', ...bigNumber(fmtTok(tot.p + tot.c)).split('\n'), '     total tokens (in+out)');
     }
   } else {
     lines.push(`settled ${done.length} · ok ${nOk} failed ${nFail} running ${nFlight}${tokTotal}`);

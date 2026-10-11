@@ -205,7 +205,7 @@ test('renderFrame: per-lane + footer token totals from usage records', () => {
 test('bigNumber renders block digits; done frame ends with spend card', () => {
   const b = bigNumber('37k');
   assert.equal(b.split('\n').length, 5);
-  assert.match(b.split('\n')[0], /##### ##### #   #/);
+  assert.match(b.split('\n')[0], /█████ █████ █   █/);
 
   const s = foldState(recs([
     { type: 'run-start', runId: 'r1', at: '2026-10-11T00:00:00.000Z' },
@@ -214,7 +214,7 @@ test('bigNumber renders block digits; done frame ends with spend card', () => {
   ]));
   const f = renderFrame(s, { width: 90, tick: 0 });
   assert.match(f, /total tokens \(in\+out\)/);
-  assert.match(f, /##### ##### #   #/); // 37k in block font
+  assert.match(f, /█████ █████ █   █/); // 37k in block font
 
   const usd = foldState(recs([
     { type: 'agent', i: 0, ok: true, result: { text: 'x', usage: { costUsd: 0.04 } }, at: 't' },
@@ -222,5 +222,5 @@ test('bigNumber renders block digits; done frame ends with spend card', () => {
   ]));
   const f2 = renderFrame(usd, { width: 90 });
   assert.match(f2, /total spend/);
-  assert.match(f2.split('\n').find((l) => l.includes('#')), /##/);
+  assert.match(f2.split('\n').find((l) => l.includes('█')), /██/);
 });

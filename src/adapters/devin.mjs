@@ -157,8 +157,10 @@ export default {
       if (TERMINAL.has(s.status)) return { custom_id: cid, result: { error: { message: `session ${s.status}${s.status_detail ? ` (${s.status_detail})` : ''} without output` } } };
       return { custom_id: cid, pending: true };
     }));
-    if (results.some((x) => x.pending)) return { ok: true, status: 'in_progress', results: null };
-    return { ok: true, status: 'completed', results: results.map(({ custom_id, result }) => ({ custom_id, result })) };
+    const pending = results.filter((x) => x.pending).length;
+    const counts = { total: slots.length, settled: slots.length - pending, pending };
+    if (pending) return { ok: true, status: 'in_progress', results: null, counts };
+    return { ok: true, status: 'completed', results: results.map(({ custom_id, result }) => ({ custom_id, result })), counts };
   },
 
   batchResultMap(results) {

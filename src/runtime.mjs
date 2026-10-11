@@ -201,6 +201,7 @@ export async function runScript(opts) {
     const settled = await pool.run(async () => {
       if (abort.signal.aborted) return { cancelled: true };
       inFlight.add(spec);
+      journal.append({ type: 'in-flight', i, label: spec.label, model: spec.model ?? null, at: new Date().toISOString() });
       try {
         // worktree:'auto' — runner-provisioned checkout, journaled. The
         // adapter never sees the literal (KTD3); 'true' still passes through
@@ -350,11 +351,25 @@ export async function runScript(opts) {
           batchId = sub.batchId;
           journal.append({ type: 'batch', batch_id: batchId, firstI, count: specs.length, model: batchModel, hash, at: new Date().toISOString() });
         }
+        // Every item index is now pending on the batch — watch/status show
+        // them in-flight until their own agent records land. Skip indices a
+        // prior partial run already settled.
+        for (const { spec, i } of specs) {
+          if (!prior?.settled.has(i)) {
+            journal.append({ type: 'in-flight', i, label: spec.label, model: spec.model ?? batchModel, batch: batchId, at: new Date().toISOString() });
+          }
+        }
         const timeoutMs = batchOpts.batchTimeoutMs ?? batchTimeoutMs;
         const deadline = Date.now() + timeoutMs;
         for (;;) {
           if (abort.signal.aborted) return { cancelled: true };
           const b = await adapter.getBatch(batchId, io);
+          journal.append({
+            type: 'batch-poll', batch_id: batchId,
+            status: b.ok ? (b.status ?? 'unknown') : `poll-error:${b.error?.code ?? b.error?.message ?? 'fetch'}`,
+            ...(b.counts ? { pending: b.counts.pending, settled: b.counts.settled, total: b.counts.total } : {}),
+            at: new Date().toISOString(),
+          });
           if (!b.ok) {
             if (b.error?.permissionDenied) {
               return { items: settleAll(() => ({ ok: false, error: b.error })) };

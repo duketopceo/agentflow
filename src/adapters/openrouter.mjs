@@ -115,7 +115,9 @@ export default {
       return errResult(String(e?.message ?? e));
     }
     if (!r.ok) return httpErr(r.status, data);
-    return { ok: true, status: data?.status, results: data?.results ?? null, error: data?.error ?? null };
+    const rc = data?.request_counts;
+    const counts = rc ? { total: rc.total ?? null, settled: (rc.completed ?? 0) + (rc.failed ?? 0), pending: (rc.total ?? 0) - (rc.completed ?? 0) - (rc.failed ?? 0) } : null;
+    return { ok: true, status: data?.status, results: data?.results ?? null, error: data?.error ?? null, counts };
   },
 
   // Normalize whatever shape /batches returns for results into

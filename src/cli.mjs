@@ -4,6 +4,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runScript } from './runtime.mjs';
 import { Journal } from './journal.mjs';
+import { readJournal, foldState, renderFrame } from './watch.mjs';
 import { adapters, getAdapter } from './adapters/index.mjs';
 
 const USAGE = `agentflow — cross-harness dynamic workflows
@@ -19,6 +20,7 @@ usage:
   agentflow stop <run-id>          SIGTERM the journaled pid, wait for run-end
   agentflow clean [--all]          remove worktrees of ended runs
                                    (--all: also sweep unrecorded dirs)
+  agentflow watch [run-id]         live view of a run (newest if no id)
   agentflow doctor
   agentflow list
 
@@ -94,6 +96,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (cmd === 'tail') return statusCmd(cwd, flags._[0], true);
   if (cmd === 'stop') return stopCmd(cwd, flags._[0]);
   if (cmd === 'clean') return cleanCmd(cwd, flags);
+  if (cmd === 'watch') return watchCmd(cwd, flags._[0]);
 
   if (cmd === 'doctor') {
     const probes = await Promise.all(Object.entries(adapters).map(async ([name, adapter]) => [name, await adapter.probe()]));
@@ -139,7 +142,7 @@ function detachRun(cwd, rawArgv) {
   const args = [SELF, ...head, '--run-id', runId, '--cwd', cwd, ...tail];
   const child = spawn(process.execPath, args, { detached: true, stdio: ['ignore', logFd, logFd], cwd });
   child.unref();
-  process.stdout.write(`run ${runId} (detached, pid ${child.pid})\n  watch:  agentflow tail ${runId}\n  status: agentflow status ${runId}\n`);
+  process.stdout.write(`run ${runId} (detached, pid ${child.pid})\n  watch:  agentflow watch ${runId}\n  status: agentflow status ${runId}\n`);
   return 0;
 }
 
@@ -329,4 +332,39 @@ function cleanCmd(cwd, flags) {
   }
   process.stdout.write(removed ? `removed ${removed} worktree(s)\n` : 'nothing to clean\n');
   return 0;
+}
+
+// Live run view. TTY: alternate-screen ANSI frame redrawn every 250ms from
+// the journal event stream. Non-TTY: identical to `tail` (event lines).
+// Read-only — Ctrl-C exits the view, never touches the run.
+async function watchCmd(cwd, runId) {
+  if (!runId) {
+    const dir = Journal.dirFor(cwd);
+    const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.jsonl')).sort() : [];
+    runId = files.at(-1)?.replace(/\.jsonl$/, '');
+    if (!runId) { process.stderr.write(`agentflow: no runs under ${dir}\n`); return 2; }
+  }
+  const path = Journal.pathFor(cwd, runId);
+  if (!existsSync(path)) { process.stderr.write(`agentflow: no journal for run '${runId}' under ${Journal.dirFor(cwd)}\n`); return 2; }
+  if (!process.stdout.isTTY) return statusCmd(cwd, runId, true);
+
+  process.stdout.write('\x1b[?1049h\x1b[?25l');
+  let state, tick = 0;
+  try {
+    for (;;) {
+      state = foldState(readJournal(path));
+      process.stdout.write('\x1b[H' + renderFrame(state, {
+        now: Date.now(), width: process.stdout.columns ?? 100, tick,
+        pidAlive: state.done ? null : ['live', 'live-unverified'].includes(pidState(state.meta)),
+      }));
+      if (state.done) break;
+      await new Promise((r) => setTimeout(r, 250));
+      tick++;
+    }
+  } finally {
+    process.stdout.write('\x1b[?25h\x1b[?1049l');
+  }
+  const settled = state ? [...state.lanes.values()].filter((l) => l.state === 'ok' || l.state === 'fail').length : 0;
+  process.stdout.write(`run ${runId} ended: ${state.done?.reason ?? '?'} — settled ${settled}\n`);
+  return endCode(state.done);
 }

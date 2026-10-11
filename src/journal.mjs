@@ -31,7 +31,7 @@ export class Journal {
   }
 
   static load(path) {
-    const meta = { settled: new Map(), ended: null, runStart: null, worktrees: [], batches: [] };
+    const meta = { settled: new Map(), ended: null, runStart: null, worktrees: [], batches: [], inFlight: new Map(), batchPolls: [] };
     if (!existsSync(path)) return meta;
     for (const line of readFileSync(path, 'utf8').split('\n')) {
       if (!line.trim()) continue;
@@ -42,7 +42,11 @@ export class Journal {
       else if (rec.type === 'run-end') meta.ended = rec;
       else if (rec.type === 'worktree') meta.worktrees.push(rec);
       else if (rec.type === 'batch') meta.batches.push(rec);
+      // Progress records — watch/status render these; replay ignores them.
+      else if (rec.type === 'in-flight') meta.inFlight.set(rec.i, rec);
+      else if (rec.type === 'batch-poll') meta.batchPolls.push(rec);
     }
+    for (const i of meta.inFlight.keys()) if (meta.settled.has(i)) meta.inFlight.delete(i);
     return meta;
   }
 

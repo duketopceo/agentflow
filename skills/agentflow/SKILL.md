@@ -143,7 +143,9 @@ Never retried: `permissionDenied` and `timedOut`. All three settable in
 **Backgrounded runs:** `--detach` returns immediately with a run-id (the child
 keeps running, output in `.agentflow/runs/<id>.log`). `agentflow status <id>`
 prints settled/total + outcome (exit 2 while running), `agentflow tail <id>`
-streams journal events until run-end. Use detach for long fan-outs and check
+streams journal events until run-end, and `agentflow watch [id]` renders a
+live per-lane terminal view (in-flight spinners, batch poll progress; falls
+back to `tail` output when piped). Use detach for long fan-outs and check
 back — same model as Claude's detached Workflow.
 
 `agentflow stop <id>` SIGTERMs the journaled pid only when it verifies as the

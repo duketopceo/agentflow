@@ -4,29 +4,36 @@
 // the synchronous `ctx.tool.transform` editor (JSON Schema inputs, `{ content }`
 // returns). Imported from `@opencode/plugin`.
 //
-// This file imports ONLY the v2 SDK — see the note in v1.ts on why the two
+// This file imports ONLY the v2 SDK — see the note in v1.mjs on why the two
 // SDKs cannot be merged into one module.
 //
-// STATUS: written against the v2 plugin docs and NOT yet exercised on a live
-// v2 install — no v2 CLI is published yet (latest opencode-ai is 1.19.0). The
-// only thing verifiable today is that this file loads and that setup() degrades
-// quietly on a context without a `tool` domain rather than throwing at load.
+// Plain .mjs, not .ts: OpenCode loads this file, and Node 20 (a supported
+// runtime, and a CI leg) cannot import .ts at all. Plain JS keeps the whole
+// matrix green and the `engines` floor honest.
+//
+// STATUS: exercised in the test suite (setup registers both tools against a
+// ToolDomain, and degrades quietly on a context without one) but NOT yet on a
+// live v2 install — no v2 CLI is published yet (latest opencode-ai is 1.19.0).
 //
 // Requires `agentflow` on PATH (repo bin/agentflow, or `npm link` in the repo).
 import { Plugin } from "@opencode/plugin";
 import {
   RUN_DESCRIPTION, DOCTOR_DESCRIPTION, HARNESS_DESCRIPTION, VIA_DESCRIPTION,
   SCRIPT_DESCRIPTION, SCRIPT_ARGS_DESCRIPTION,
-  buildRunArgs, buildDoctorArgs, runAgentflow,
+  buildRunArgs, buildDoctorArgs, runAgentflow, toolOutcome,
 } from "./args.mjs";
 
 export default Plugin.define({
   id: "agentflow",
   async setup(ctx) {
-    // Fail soft. A v2 build without the tool domain would otherwise throw here
-    // — and because setup is awaited at load, that kills the whole plugin
-    // rather than degrading it. Nothing else in this plugin depends on load.
-    if (!ctx?.tool?.transform) return;
+    // Fail soft, but loudly enough to diagnose. A host without a tool domain
+    // would otherwise throw here, and because setup is awaited at load that
+    // kills the whole plugin. Returning silently would leave an operator
+    // staring at a missing tool with no explanation, so log the cause.
+    if (!ctx?.tool?.transform) {
+      console.error("[agentflow] v2 plugin context has no tool domain — tools not registered");
+      return;
+    }
 
     const cwd = ctx.location.directory;
     const registration = await ctx.tool.transform((editor) => {
@@ -45,9 +52,8 @@ export default Plugin.define({
           additionalProperties: false,
         },
         async execute(input) {
-          const a = input as { script: string; harness?: string; via?: string; scriptArgs?: string };
-          const r = await runAgentflow(buildRunArgs(a), { cwd });
-          return { content: r.out };
+          const r = await runAgentflow(buildRunArgs(input), { cwd });
+          return toolOutcome(r);
         },
       });
       editor.add({
@@ -56,12 +62,14 @@ export default Plugin.define({
         input: { type: "object", properties: {}, additionalProperties: false },
         async execute() {
           const r = await runAgentflow(buildDoctorArgs(), { cwd });
-          return { content: r.out };
+          return toolOutcome(r);
         },
       });
     });
     // Retain the registration so a plugin reload disposes its transform instead
-    // of stacking a second editor.add of the same two tool names.
-    return () => { void registration?.dispose?.(); };
+    // of stacking a second editor.add of the same two tool names. Returning the
+    // promise lets the host await teardown; dropping it would surface a
+    // rejecting dispose as an unhandled rejection.
+    return () => registration.dispose();
   },
 });

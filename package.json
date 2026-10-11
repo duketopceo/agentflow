@@ -7,10 +7,10 @@
     "agentflow": "bin/agentflow"
   },
   "exports": {
-    ".": "./plugins/agentflow/v2.ts",
-    "./server": "./plugins/agentflow/v1.ts",
-    "./v2": "./plugins/agentflow/v2.ts",
-    "./v1": "./plugins/agentflow/v1.ts"
+    ".": "./plugins/agentflow/v2.mjs",
+    "./server": "./plugins/agentflow/v1.mjs",
+    "./v1": "./plugins/agentflow/v1.mjs",
+    "./v2": "./plugins/agentflow/v2.mjs"
   },
   "scripts": {
     "test": "node --test",
@@ -42,7 +42,7 @@
   "dependencies": {
     "@opencode-ai/plugin": ">=1.18.29"
   },
-  "optionalDependencies": {
+  "devDependencies": {
     "@opencode/plugin": ">=2.0.0"
   }
 }

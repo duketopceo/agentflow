@@ -1,13 +1,11 @@
 #!/usr/bin/env node
-// Fake `agentflow` CLI for the OpenCode plugin tests. Mirrors the real runner's
-// stream contract: every operator-relevant line goes to STDERR and stdout stays
-// empty, so a consumer that reads stdout alone regresses to "" — the defect
-// this suite guards against.
+// Fake `agentflow` CLI for the OpenCode plugin tests.
 //
-// Env knobs (mirroring the fakebin/ harness-stub convention):
-//   AGENTFLOW_FAKE_EXIT=<n>   exit n (default 0)
-//   AGENTFLOW_FAKE_ARGV_FILE  append received argv to this file
-//   AGENTFLOW_FAKE_SLEEP=<ms> sleep before responding
+// Mirrors the REAL runner's stream contract per subcommand, because the plugin
+// captures both streams and neither half may be assumed:
+//   run      -> stderr (stdout empty; verified against bin/agentflow)
+//   doctor   -> stdout (src/cli.mjs writes probe rows to stdout)
+// Env knobs: AGENTFLOW_FAKE_EXIT=<n>, AGENTFLOW_FAKE_ARGV_FILE, AGENTFLOW_FAKE_SLEEP=<ms>
 import { appendFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
@@ -15,20 +13,21 @@ const sleep = Number(process.env.AGENTFLOW_FAKE_SLEEP ?? 0);
 if (sleep) await new Promise((r) => setTimeout(r, sleep));
 
 if (process.env.AGENTFLOW_FAKE_ARGV_FILE) {
-  appendFileSync(process.env.AGENTFLOW_FAKE_ARGV_FILE, argv.join(' ') + '\n');
+  // JSON so argument boundaries survive — the runner's parser accepts multiple
+  // trailing args after `--`, and a space-joined string would hide that.
+  appendFileSync(process.env.AGENTFLOW_FAKE_ARGV_FILE, JSON.stringify(argv) + '\n');
 }
 
 if (argv[0] === 'doctor') {
-  process.stderr.write('ok      echo   (test adapter)\n');
+  process.stdout.write('ok      echo   (test adapter)\n');
 } else {
-  const runId = 'fake-run-0001';
-  process.stderr.write(`[0.0s] [p] a -> ok (0.0s)\n`);
-  process.stderr.write(`[0.0s] [p] RESULT: {"text":"PONG"}\n`);
-  process.stderr.write(`[agentflow] run ${runId}\n`);
+  process.stderr.write('[0.0s] [p] a -> ok (0.0s)\n');
+  process.stderr.write('[0.0s] [p] RESULT: {"text":"PONG"}\n');
+  process.stderr.write('[agentflow] run fake-run-0001\n');
 }
 
 const code = Number(process.env.AGENTFLOW_FAKE_EXIT ?? 0);
 if (code !== 0) {
-  process.stderr.write(`agentflow: script failed with reason FAKED\n`);
+  process.stderr.write('agentflow: script failed with reason FAKED\n');
   process.exit(code);
 }

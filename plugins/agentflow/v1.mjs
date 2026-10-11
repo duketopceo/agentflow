@@ -7,7 +7,9 @@
 // This file imports ONLY the v1 SDK. The two OpenCode SDKs expose incompatible
 // v2 plugin contexts — `@opencode-ai/plugin/v2/promise` has no `tool` domain
 // while `@opencode/plugin` does — so a single module importing both cannot
-// serve both arms. See v2.ts for the counterpart.
+// serve both arms. See v2.mjs for the counterpart.
+//
+// Plain .mjs, not .ts: see the note in v2.mjs.
 //
 // Requires `agentflow` on PATH (repo bin/agentflow, or `npm link` in the repo).
 import { tool } from "@opencode-ai/plugin";
@@ -34,8 +36,14 @@ export default {
           // helper so both arms share ONE capture path. The v1 plugin that
           // shipped before read stdout only, so every successful run returned
           // "" and the caller lost the run-id — the regression these tests pin.
+          //
+          // A failed run THROWS rather than returning its text: neither SDK
+          // exposes an error channel in a tool result, so a returned string is
+          // recorded as a successful call. The runner's own failure reason is
+          // carried in the thrown message.
           async execute(args) {
             const r = await runAgentflow(buildRunArgs(args), { cwd });
+            if (r.code !== 0) throw new Error(r.out);
             return r.out;
           },
         }),
@@ -44,6 +52,7 @@ export default {
           args: {},
           async execute() {
             const r = await runAgentflow(buildDoctorArgs(), { cwd });
+            if (r.code !== 0) throw new Error(r.out);
             return r.out;
           },
         }),

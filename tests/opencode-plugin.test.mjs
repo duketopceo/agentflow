@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildRunArgs, buildDoctorArgs, runAgentflow } from '../plugins/agentflow/args.mjs';
@@ -80,41 +80,60 @@ test('runAgentflow: nonzero exit surfaces the stderr reason, not a bare code', a
   assert.match(out, /script failed with reason FAKED/, 'failure reason must be visible');
 });
 
-test('runAgentflow: argv reaches the stub in the documented order', async () => {
-  const argvFile = join(tmpdir(), `af-argv-${process.pid}.txt`);
-  await withFakebin(
-    () => runAgentflow(
-      buildRunArgs({ script: 'w.mjs', harness: 'devin', via: 'ori', scriptArgs: 'q' }),
-      { cwd: tmpdir(), bin: 'agentflow' },
-    ),
-    { AGENTFLOW_FAKE_ARGV_FILE: argvFile },
-  );
-  const line = readFileSync(argvFile, 'utf8').trim();
-  assert.equal(line, 'run w.mjs --harness devin --via ori -- q');
+test('runAgentflow: argv reaches the stub as an array in the documented order', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'af-argv-'));
+  const argvFile = join(dir, 'argv.jsonl');
+  try {
+    const { code } = await withFakebin(
+      () => runAgentflow(
+        buildRunArgs({ script: 'w.mjs', harness: 'devin', via: 'ori', scriptArgs: 'do the thing' }),
+        { cwd: dir, bin: 'agentflow' },
+      ),
+      { AGENTFLOW_FAKE_ARGV_FILE: argvFile },
+    );
+    assert.equal(code, 0);
+    // Boundaries matter: the runner's parser takes MULTIPLE trailing args after
+    // `--`, so a space-joined assertion would hide a boundary bug.
+    assert.deepEqual(JSON.parse(readFileSync(argvFile, 'utf8').trim()),
+      ['run', 'w.mjs', '--harness', 'devin', '--via', 'ori', '--', 'do the thing']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
-test('runAgentflow: doctor returns non-empty combined output', async () => {
+test('runAgentflow: a timeout is named and reported distinctly', async () => {
+  const { code, out } = await withFakebin(
+    () => runAgentflow(['run', 'w.mjs'], { cwd: tmpdir(), bin: 'agentflow', timeoutMs: 40 }),
+    { AGENTFLOW_FAKE_SLEEP: '1500' },
+  );
+  assert.equal(code, 124, 'a timeout must not look like an ordinary nonzero exit');
+  assert.match(out, /timed out/);
+});
+
+test('runAgentflow: a missing agentflow binary is named, not reported as "exited 1"', async () => {
+  const { code, out } = await runAgentflow(['doctor'], { cwd: tmpdir(), bin: 'agentflow-does-not-exist' });
+  assert.equal(code, 127);
+  assert.match(out, /not found on PATH/, 'the ENOENT case must name the real cause');
+});
+
+// stdout capture must be pinned as firmly as stderr. `doctor` writes to stdout
+// in the real runner, so a capture that dropped stdout would return only the
+// empty-output sentinel for it — and no stderr-only stub could detect that.
+test('runAgentflow: stdout-only output is captured, not discarded', async () => {
   const { code, out } = await withFakebin(() =>
     runAgentflow(buildDoctorArgs(), { cwd: tmpdir(), bin: 'agentflow' }),
   );
   assert.equal(code, 0);
-  assert.match(out, /test adapter/);
+  assert.match(out, /test adapter/, 'doctor writes to stdout; that half must be captured too');
 });
 
-
-// --- v1 entry --------------------------------------------------------------
-
-// Node <22.18 cannot import .ts (no type stripping) — the entry tests below
-// load the real plugin files, so gate them on the runtime capability.
-const canImportTs = typeof process.features?.typescript === 'string';
-
-test('v1 entry: default export exposes the server() plugin function', { skip: !canImportTs }, async () => {
-  const mod = await import('../plugins/agentflow/v1.ts');
+test('v1 entry: default export exposes the server() plugin function', async () => {
+  const mod = await import('../plugins/agentflow/v1.mjs');
   assert.equal(typeof mod.default.server, 'function');
 });
 
-test('v1 entry: registers both tools and returns run output carrying the run-id', { skip: !canImportTs }, async () => {
-  const mod = await import('../plugins/agentflow/v1.ts');
+test('v1 entry: registers both tools and returns run output carrying the run-id', async () => {
+  const mod = await import('../plugins/agentflow/v1.mjs');
   const hooks = await withFakebin(() => mod.default.server({ directory: tmpdir() }));
   assert.deepEqual(Object.keys(hooks.tool).sort(), ['agentflow_doctor', 'agentflow_run']);
   const out = await withFakebin(() => hooks.tool.agentflow_run.execute({ script: 'w.mjs' }));
@@ -124,14 +143,14 @@ test('v1 entry: registers both tools and returns run output carrying the run-id'
 
 // --- v2 entry --------------------------------------------------------------
 
-test('v2 entry: default export is a Plugin.define with a stable id and setup', { skip: !canImportTs }, async () => {
-  const mod = await import('../plugins/agentflow/v2.ts');
+test('v2 entry: default export is a Plugin.define with a stable id and setup', async () => {
+  const mod = await import('../plugins/agentflow/v2.mjs');
   assert.equal(mod.default.id, 'agentflow', 'v2 plugin needs a stable id for storage scoping');
   assert.equal(typeof mod.default.setup, 'function');
 });
 
-test('v2 entry: setup() registers both tools against a real ctx.tool transform', { skip: !canImportTs }, async () => {
-  const mod = await import('../plugins/agentflow/v2.ts');
+test('v2 entry: setup() registers both tools against a real ctx.tool transform', async () => {
+  const mod = await import('../plugins/agentflow/v2.mjs');
   const added = [];
   const disposed = { called: false };
   const ctx = {
@@ -150,17 +169,17 @@ test('v2 entry: setup() registers both tools against a real ctx.tool transform',
   assert.ok(disposed.called, 'setup must return a cleanup that disposes the registration');
 });
 
-test('v2 entry: setup() degrades quietly when the context has no tool domain', { skip: !canImportTs }, async () => {
+test('v2 entry: setup() degrades quietly when the context has no tool domain', async () => {
   // Regression guard. An earlier draft called ctx.tool.transform unguarded and
   // threw `Cannot read properties of undefined` — and because setup is awaited
   // at load, that kills the plugin instead of degrading it.
-  const mod = await import('../plugins/agentflow/v2.ts');
+  const mod = await import('../plugins/agentflow/v2.mjs');
   const ctx = { location: { directory: tmpdir() } };
   await assert.doesNotReject(() => mod.default.setup(ctx));
 });
 
-test('v2 entry: run tool returns { content } and captures the run-id', { skip: !canImportTs }, async () => {
-  const mod = await import('../plugins/agentflow/v2.ts');
+test('v2 entry: run tool returns { content } and captures the run-id', async () => {
+  const mod = await import('../plugins/agentflow/v2.mjs');
   const added = [];
   const ctx = {
     location: { directory: tmpdir() },
@@ -173,10 +192,74 @@ test('v2 entry: run tool returns { content } and captures the run-id', { skip: !
   assert.match(res.content, /\[agentflow\] run /);
 });
 
-// --- failure surfacing -----------------------------------------------------
+// --- arm-level coverage ----------------------------------------------------
+//
+// The tests above pin runAgentflow and the entry shapes. These drive the TOOLS
+// themselves, which is where a broken return value would otherwise hide: a
+// doctor tool returning "" or a run tool swallowing a failed run both leave
+// every earlier test green.
 
-test('runAgentflow: a missing agentflow binary is named, not reported as "exited 1"', async () => {
-  const { code, out } = await runAgentflow(['doctor'], { cwd: tmpdir(), bin: 'agentflow-does-not-exist' });
-  assert.equal(code, 127);
-  assert.match(out, /not found on PATH/, 'the ENOENT case must name the real cause');
+test('v1 arm: agentflow_doctor.execute returns the probe output', async () => {
+  const mod = await import('../plugins/agentflow/v1.mjs');
+  const hooks = await withFakebin(() => mod.default.server({ directory: tmpdir() }));
+  const out = await withFakebin(() => hooks.tool.agentflow_doctor.execute({}));
+  assert.ok(out && out.length > 0, 'doctor tool must return real probe output, not ""');
+  assert.match(out, /test adapter/);
+});
+
+test('v1 arm: a failed run throws rather than returning failure text as success', async () => {
+  // Neither SDK exposes an error channel inside a tool RESULT, so a returned
+  // string is recorded as a successful call. A failed run must throw.
+  const mod = await import('../plugins/agentflow/v1.mjs');
+  const hooks = await withFakebin(() => mod.default.server({ directory: tmpdir() }));
+  await assert.rejects(
+    () => withFakebin(() => hooks.tool.agentflow_run.execute({ script: 'w.mjs' }), { AGENTFLOW_FAKE_EXIT: '2' }),
+    /script failed with reason FAKED/,
+  );
+});
+
+test('v2 arm: a failed run throws rather than returning failure text as success', async () => {
+  const mod = await import('../plugins/agentflow/v2.mjs');
+  const added = [];
+  const ctx = {
+    location: { directory: tmpdir() },
+    tool: { transform: async (cb) => { cb({ add: (t) => added.push(t) }); return { dispose: async () => {} }; } },
+  };
+  await withFakebin(() => mod.default.setup(ctx));
+  const run = added.find((t) => t.name === 'agentflow_run');
+  await assert.rejects(
+    () => withFakebin(() => run.execute({ script: 'w.mjs' }), { AGENTFLOW_FAKE_EXIT: '2' }),
+    /script failed with reason FAKED/,
+  );
+});
+
+test('v2 arm: agentflow_doctor.execute returns { content } with the probe output', async () => {
+  const mod = await import('../plugins/agentflow/v2.mjs');
+  const added = [];
+  const ctx = {
+    location: { directory: tmpdir() },
+    tool: { transform: async (cb) => { cb({ add: (t) => added.push(t) }); return { dispose: async () => {} }; } },
+  };
+  await withFakebin(() => mod.default.setup(ctx));
+  const doctor = added.find((t) => t.name === 'agentflow_doctor');
+  const res = await withFakebin(() => doctor.execute({}));
+  assert.match(res.content, /test adapter/);
+});
+
+// The whole point of args.mjs is that the two arms cannot drift. Pin it.
+test('both arms expose the same two tools with the same descriptions', async () => {
+  const v1 = await import('../plugins/agentflow/v1.mjs');
+  const v2 = await import('../plugins/agentflow/v2.mjs');
+  const v1hooks = await withFakebin(() => v1.default.server({ directory: tmpdir() }));
+  const added = [];
+  await withFakebin(() => v2.default.setup({
+    location: { directory: tmpdir() },
+    tool: { transform: async (cb) => { cb({ add: (t) => added.push(t) }); return { dispose: async () => {} }; } },
+  }));
+  const names = (obj) => Object.keys(obj).sort();
+  const v2names = added.map((t) => t.name).sort();
+  assert.deepEqual(names(v1hooks.tool), v2names);
+  const RUN = 'Run an agentflow dynamic-workflow script';
+  assert.ok(v1hooks.tool.agentflow_run.description.startsWith(RUN), 'v1 run description');
+  assert.ok(added.find((t) => t.name === 'agentflow_run').description.startsWith(RUN), 'v2 run description');
 });

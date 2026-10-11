@@ -3,11 +3,17 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "main": "./v2.ts",
+  "main": "./v2.mjs",
   "exports": {
-    ".": "./v2.ts",
-    "./v1": "./v1.ts",
-    "./v2": "./v2.ts"
+    ".": "./v2.mjs",
+    "./server": "./v1.mjs",
+    "./v1": "./v1.mjs",
+    "./v2": "./v2.mjs"
   },
-  "description": "agentflow runner tools for OpenCode v2 (v1 arm at ./v1.ts)"
+  "description": "agentflow runner tools for OpenCode v2 (v1 arm at ./v1.mjs)",
+  "peerDependencies": {
+    "@opencode/plugin": ">=2.0.0",
+    "@opencode-ai/plugin": ">=1.18.29"
+  }
 }
+

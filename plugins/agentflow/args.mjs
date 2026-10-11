@@ -79,3 +79,12 @@ export function runAgentflow(argv, { cwd, timeoutMs = 30 * 60_000, bin = 'agentf
     });
   });
 }
+
+// Shape a runAgentflow result for a v2 tool. Neither SDK exposes an error
+// channel inside a tool RESULT — a returned value is recorded as a successful
+// call — so a failed run must throw to be seen as one. Shared so both arms
+// treat failure identically.
+export function toolOutcome(r) {
+  if (r.code !== 0) throw new Error(r.out);
+  return { content: r.out };
+}

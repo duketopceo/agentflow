@@ -62,12 +62,42 @@ const fmtSecs = (ms) => {
   return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
 };
 
+// Big-ASCII finale card — 5-row block font for the run's spend figure.
+// Charset covers what totals render as: digits, '.', '$', 'k', 'M', space.
+const GLYPH = {
+  '0': ['█████', '█   █', '█   █', '█   █', '█████'],
+  '1': ['  █  ', ' ██  ', '  █  ', '  █  ', '█████'],
+  '2': ['█████', '    █', '█████', '█    ', '█████'],
+  '3': ['█████', '    █', ' ████', '    █', '█████'],
+  '4': ['█   █', '█   █', '█████', '    █', '    █'],
+  '5': ['█████', '█    ', '█████', '    █', '█████'],
+  '6': ['█████', '█    ', '█████', '█   █', '█████'],
+  '7': ['█████', '    █', '   █ ', '  █  ', '  █  '],
+  '8': ['█████', '█   █', '█████', '█   █', '█████'],
+  '9': ['█████', '█   █', '█████', '    █', '█████'],
+  '.': ['     ', '     ', '     ', '     ', '  █  '],
+  '$': [' ████', '█ █  ', ' ███ ', '  █ █', '████ '],
+  'k': ['█   █', '█  █ ', '███  ', '█  █ ', '█   █'],
+  'M': ['█   █', '██ ██', '█ █ █', '█   █', '█   █'],
+  ' ': ['     ', '     ', '     ', '     ', '     '],
+};
+
+export function bigNumber(str) {
+  const chars = [...str].map((c) => GLYPH[c] ?? GLYPH[' ']);
+  return [0, 1, 2, 3, 4].map((r) => chars.map((g) => g[r]).join(' ')).join('\n');
+}
+
+const progressBar = (done, total, seg = 24) => {
+  if (!total) return '';
+  const fill = Math.round((done / total) * seg);
+  return `${'█'.repeat(fill)}${'░'.repeat(seg - fill)} ${done}/${total}`;
+};
+
 // One frame of the watch view. `tick` rotates the in-flight spinner;
 // `now`/`runStart.at` derive ages deterministically for tests.
 export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pidAlive = null } = {}) {
   const w = Math.max(40, width);
   const lines = [];
-  const rule = '─'.repeat(w);
   const meta = state.meta ?? {};
   const started = meta.at ? Date.parse(meta.at) : now;
   const lanes = [...state.lanes.values()].sort((a, b) => a.i - b.i);
@@ -77,10 +107,10 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
   const nFlight = lanes.filter((l) => l.state === 'in-flight').length;
   const spin = SPIN[tick % SPIN.length];
 
-  lines.push(`agentflow watch — ${meta.runId ?? '?'}`);
+  lines.push(`agentflow — ${meta.runId ?? '?'}`);
   const alive = state.done ? `ended ${state.done.reason}` : (pidAlive === false ? 'pid gone — orphaned?' : (meta.pid ? `pid ${meta.pid}` : 'running'));
-  lines.push(`${trunc(meta.script ?? '?', Math.floor(w / 3))}  harness=${meta.harness ?? '?'}  elapsed ${fmtSecs(now - started)}  ${alive}${state.done ? ` at ${state.done.at ?? '?'}` : ''}`);
-  lines.push(rule);
+  lines.push(`${trunc(meta.script ?? '?', Math.floor(w / 3))} · ${meta.harness ?? '?'} · ${fmtSecs(now - started)} · ${alive}`);
+  lines.push(progressBar(done.length, lanes.length, Math.min(24, w - 10)));
 
   for (const lane of lanes) {
     const tag = `[${lane.i}]`;
@@ -88,7 +118,7 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
     const label = trunc(`${tag} ${lane.label ?? ''}${model}`, Math.floor(w * 0.45));
     if (lane.state === 'in-flight') {
       const age = lane.at ? ` ${fmtSecs(now - Date.parse(lane.at))}` : '';
-      lines.push(`${spin} ${label.padEnd(Math.floor(w * 0.45))} in-flight${age}`);
+      lines.push(`${spin} ${label.padEnd(Math.floor(w * 0.45))} running${age}`);
     } else if (lane.state === 'ok') {
       lines.push(`${ICON.ok} ${label.padEnd(Math.floor(w * 0.45))} ok ${lane.elapsed ?? ''}s${tokPair(lane.usage)}`);
     } else if (lane.state === 'fail') {
@@ -105,11 +135,22 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
   }
 
   const nAbandoned = lanes.filter((l) => l.state === 'abandoned').length;
-  const tot = lanes.reduce((a, l) => (l.usage ? { p: a.p + (l.usage.promptTokens ?? 0), c: a.c + (l.usage.completionTokens ?? 0), n: a.n + 1 } : a), { p: 0, c: 0, n: 0 });
+  const tot = lanes.reduce((a, l) => (l.usage
+    ? { p: a.p + (l.usage.promptTokens ?? 0), c: a.c + (l.usage.completionTokens ?? 0), usd: a.usd + (l.usage.costUsd ?? 0), n: a.n + 1 }
+    : a), { p: 0, c: 0, usd: 0, n: 0 });
   const tokTotal = tot.n ? `  tok ${fmtTok(tot.p)}/${fmtTok(tot.c)}` : '';
-  lines.push(rule);
-  lines.push(state.done
-    ? `run ${state.done.reason}  —  ok ${nOk}  failed ${nFail}  abandoned ${nAbandoned}${tokTotal}`
-    : `settled ${done.length}  ok ${nOk}  failed ${nFail}  in-flight ${nFlight}${tokTotal}`);
+
+  if (state.done) {
+    lines.push(`run ${state.done.reason} — ok ${nOk} failed ${nFail} abandoned ${nAbandoned}${tokTotal}`);
+    // The payoff: total spend, large. costUsd wins when a harness reports
+    // dollars (claude); tokens are the spend proxy everywhere else.
+    if (tot.usd) {
+      lines.push('', bigNumber(`$${tot.usd.toFixed(2)}`), '     total spend');
+    } else if (tot.n) {
+      lines.push('', bigNumber(fmtTok(tot.p + tot.c)), '     total tokens (in+out)');
+    }
+  } else {
+    lines.push(`settled ${done.length} · ok ${nOk} failed ${nFail} running ${nFlight}${tokTotal}`);
+  }
   return lines.map((l) => l.slice(0, w)).join('\n') + '\n';
 }

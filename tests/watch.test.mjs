@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readJournal, foldState, renderFrame } from '../src/watch.mjs';
+import { readJournal, foldState, renderFrame, bigNumber } from '../src/watch.mjs';
 import { Journal } from '../src/journal.mjs';
 import { runScript } from '../src/runtime.mjs';
 import echo from '../src/adapters/echo.mjs';
@@ -57,14 +57,15 @@ test('renderFrame: deterministic layout for a fixed state + now + tick', () => {
   ]));
   const now = Date.parse('2026-10-11T00:01:00.000Z');
   const f = renderFrame(s, { now, width: 80, tick: 0, pidAlive: true });
-  assert.match(f, /agentflow watch — r1/);
-  assert.match(f, /harness=echo/);
-  assert.match(f, /elapsed 1:00/);
+  assert.match(f, /agentflow — r1/);
+  assert.match(f, /· echo ·/);
+  assert.match(f, /· 1:00 ·/);
   assert.match(f, /pid 42/);
+  assert.match(f, /█+░+ 1\/2/);
   assert.match(f, /● \[0\] a \(m1\)\s+ok 1\.0s/);
-  assert.match(f, /◐ \[1\] b\s+in-flight 58s/);
+  assert.match(f, /◐ \[1\] b\s+running 58s/);
   assert.match(f, /▶ batch\[2\] b-1\s+in_progress  1\/2 settled/);
-  assert.match(f, /settled 1  ok 1  failed 0  in-flight 1/);
+  assert.match(f, /settled 1 · ok 1 failed 0 running 1/);
   assert.ok(f.split('\n').every((l) => l.length <= 80));
 });
 
@@ -199,4 +200,27 @@ test('renderFrame: per-lane + footer token totals from usage records', () => {
   assert.match(f, /ok 1\.0s 1\.0k\/50/);
   assert.match(f, /fail 0\.5s 500\/10/);
   assert.match(f, /tok 1\.5k\/60/);
+});
+
+test('bigNumber renders block digits; done frame ends with spend card', () => {
+  const b = bigNumber('37k');
+  assert.equal(b.split('\n').length, 5);
+  assert.match(b.split('\n')[0], /█████ █████ █   █/);
+
+  const s = foldState(recs([
+    { type: 'run-start', runId: 'r1', at: '2026-10-11T00:00:00.000Z' },
+    { type: 'agent', i: 0, ok: true, result: { text: 'x', usage: { promptTokens: 36500, completionTokens: 500 } }, elapsed: '1.0', at: 't' },
+    { type: 'run-end', reason: 'ok', at: 't' },
+  ]));
+  const f = renderFrame(s, { width: 90, tick: 0 });
+  assert.match(f, /total tokens \(in\+out\)/);
+  assert.match(f, /█████ █████ █   █/); // 37k in block font
+
+  const usd = foldState(recs([
+    { type: 'agent', i: 0, ok: true, result: { text: 'x', usage: { costUsd: 0.04 } }, at: 't' },
+    { type: 'run-end', reason: 'ok', at: 't' },
+  ]));
+  const f2 = renderFrame(usd, { width: 90 });
+  assert.match(f2, /total spend/);
+  assert.match(f2.split('\n').find((l) => l.includes('█')), /██/);
 });

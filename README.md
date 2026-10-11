@@ -55,7 +55,7 @@ The repo carries a manifest for each harness; all resolve to the shared
 | Devin | `devin plugins install -y duketopceo/agentflow` (or `--local /path/to/agentflow`) — reads `.devin-plugin/`; auto-installs the compound-engineering plugin via `requiredPlugins` |
 | Claude Code | `claude plugin marketplace add duketopceo/agentflow` → `.claude-plugin/` — though inside Claude, prefer the native Workflow tool |
 | Codex | `codex plugin marketplace add duketopceo/agentflow` → `.codex-plugin/` |
-| OpenCode | `opencode plugin add 'github:duketopceo/agentflow#main::path:plugins/agentflow'` — **requires opencode v2**; exposes `agentflow_run`/`agentflow_doctor`. See `.opencode/INSTALL.md` |
+| OpenCode | `opencode plugin github:duketopceo/agentflow` on v1 `1.18.29+`, or `opencode plugin add 'github:duketopceo/agentflow#main::path:plugins/agentflow'` on v2 — one package serves both, exposing `agentflow_run`/`agentflow_doctor`. The v2 arm is not yet exercised on a live install. See `.opencode/INSTALL.md` |
 | Ori/OpenRouter/Perplexity | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` / `--harness perplexity` or `--via ori` |
 
 <sub>Install rows verified from a scratch HOME on 2026-10-10 against the

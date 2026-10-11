@@ -103,28 +103,78 @@ test('runAgentflow: doctor returns non-empty combined output', async () => {
   assert.match(out, /test adapter/);
 });
 
-// --- Dual-arm shape --------------------------------------------------------
-//
-// The migration guide's "Support V1 and V2 from one package" shape is the
-// whole point of this entry: one default export carrying the v2
-// Plugin.define (id + setup) alongside the v1 `server()` plugin function.
-// These assertions pin that surface so a future edit cannot silently drop an
-// arm or leave the module unloadable.
 
-test('plugin module: default export carries both v2 and v1 surfaces', async () => {
-  const mod = await import('../plugins/agentflow/index.ts');
-  const d = mod.default;
-  assert.equal(typeof d, 'object', 'default export must be the dual module object');
-  assert.equal(d.id, 'agentflow', 'v2 arm identified by a stable id');
-  assert.equal(typeof d.setup, 'function', 'v2 arm exposes setup(ctx)');
-  assert.equal(typeof d.server, 'function', 'v1 arm exposes server() plugin function');
+// --- v1 entry --------------------------------------------------------------
+
+test('v1 entry: default export exposes the server() plugin function', async () => {
+  const mod = await import('../plugins/agentflow/v1.ts');
+  assert.equal(typeof mod.default.server, 'function');
 });
 
-test('plugin module: v1 arm registers both tools and returns run output with a run-id', async () => {
-  const mod = await import('../plugins/agentflow/index.ts');
+test('v1 entry: registers both tools and returns run output carrying the run-id', async () => {
+  const mod = await import('../plugins/agentflow/v1.ts');
   const hooks = await withFakebin(() => mod.default.server({ directory: tmpdir() }));
   assert.deepEqual(Object.keys(hooks.tool).sort(), ['agentflow_doctor', 'agentflow_run']);
   const out = await withFakebin(() => hooks.tool.agentflow_run.execute({ script: 'w.mjs' }));
   assert.ok(out.length > 0, 'v1 run output must not be empty on success');
   assert.match(out, /\[agentflow\] run /, 'v1 run output must include the run-id');
+});
+
+// --- v2 entry --------------------------------------------------------------
+
+test('v2 entry: default export is a Plugin.define with a stable id and setup', async () => {
+  const mod = await import('../plugins/agentflow/v2.ts');
+  assert.equal(mod.default.id, 'agentflow', 'v2 plugin needs a stable id for storage scoping');
+  assert.equal(typeof mod.default.setup, 'function');
+});
+
+test('v2 entry: setup() registers both tools against a real ctx.tool transform', async () => {
+  const mod = await import('../plugins/agentflow/v2.ts');
+  const added = [];
+  const disposed = { called: false };
+  const ctx = {
+    location: { directory: tmpdir() },
+    tool: {
+      transform: async (cb) => {
+        cb({ add: (t) => added.push(t) });
+        return { dispose: async () => { disposed.called = true; } };
+      },
+    },
+  };
+  const cleanup = await withFakebin(() => mod.default.setup(ctx));
+  assert.deepEqual(added.map((t) => t.name).sort(), ['agentflow_doctor', 'agentflow_run']);
+  // The registration must be retained so a reload disposes rather than stacks.
+  await cleanup();
+  assert.ok(disposed.called, 'setup must return a cleanup that disposes the registration');
+});
+
+test('v2 entry: setup() degrades quietly when the context has no tool domain', async () => {
+  // Regression guard. An earlier draft called ctx.tool.transform unguarded and
+  // threw `Cannot read properties of undefined` — and because setup is awaited
+  // at load, that kills the plugin instead of degrading it.
+  const mod = await import('../plugins/agentflow/v2.ts');
+  const ctx = { location: { directory: tmpdir() } };
+  await assert.doesNotReject(() => mod.default.setup(ctx));
+});
+
+test('v2 entry: run tool returns { content } and captures the run-id', async () => {
+  const mod = await import('../plugins/agentflow/v2.ts');
+  const added = [];
+  const ctx = {
+    location: { directory: tmpdir() },
+    tool: { transform: async (cb) => { cb({ add: (t) => added.push(t) }); return { dispose: async () => {} }; } },
+  };
+  await withFakebin(() => mod.default.setup(ctx));
+  const run = added.find((t) => t.name === 'agentflow_run');
+  const res = await withFakebin(() => run.execute({ script: 'w.mjs' }));
+  assert.ok(typeof res.content === 'string' && res.content.length > 0, 'v2 run must return non-empty content');
+  assert.match(res.content, /\[agentflow\] run /);
+});
+
+// --- failure surfacing -----------------------------------------------------
+
+test('runAgentflow: a missing agentflow binary is named, not reported as "exited 1"', async () => {
+  const { code, out } = await runAgentflow(['doctor'], { cwd: tmpdir(), bin: 'agentflow-does-not-exist' });
+  assert.equal(code, 127);
+  assert.match(out, /not found on PATH/, 'the ENOENT case must name the real cause');
 });

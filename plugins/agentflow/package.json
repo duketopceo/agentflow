@@ -3,9 +3,11 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "main": "index.ts",
-  "description": "agentflow runner tools for OpenCode v2",
-  "peerDependencies": {
-    "@opencode/plugin": "*"
-  }
+  "main": "./v2.ts",
+  "exports": {
+    ".": "./v2.ts",
+    "./v1": "./v1.ts",
+    "./v2": "./v2.ts"
+  },
+  "description": "agentflow runner tools for OpenCode v2 (v1 arm at ./v1.ts)"
 }

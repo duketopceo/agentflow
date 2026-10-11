@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { runScript } from '../src/runtime.mjs';
 import { Journal } from '../src/journal.mjs';
 import openrouter from '../src/adapters/openrouter.mjs';
+import devin from '../src/adapters/devin.mjs';
 import echo from '../src/adapters/echo.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -40,7 +41,7 @@ function fixture() {
 function stubFetch(queue) {
   const calls = [];
   const fetchImpl = async (url, opts = {}) => {
-    calls.push({ url, method: opts.method ?? 'GET', body: opts.body ? JSON.parse(opts.body) : null });
+    calls.push({ url, method: opts.method ?? 'GET', body: opts.body ? JSON.parse(opts.body) : null, headers: opts.headers ?? {} });
     const next = queue.length ? queue.shift() : { status: 500, data: { error: { message: 'unstubbed call' } } };
     return { ok: next.status < 300, status: next.status, json: async () => next.data };
   };
@@ -288,5 +289,151 @@ log('RESULT:' + JSON.stringify(r && r.map(x => x && x.text)));`);
   } finally {
     server?.close();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- devin (cloud sessions) ------------------------------------------------
+
+function withDevinAuth(fn) {
+  return async () => {
+    process.env.DEVIN_API_KEY = 'test-devin-key';
+    process.env.DEVIN_ORG_ID = 'org-test';
+    try { await fn(); } finally { delete process.env.DEVIN_API_KEY; delete process.env.DEVIN_ORG_ID; }
+  };
+}
+
+test('devin batch: submitBatch creates one structured-output session per item', withDevinAuth(async () => {
+  const stub = stubFetch([
+    { status: 200, data: { session_id: 's-1' } },
+    { status: 200, data: { session_id: 's-2' } },
+  ]);
+  const bodies = [devin.batchBody({ prompt: 'p0', label: 'l0' }), devin.batchBody({ prompt: 'p1', label: 'l1', schema: { type: 'object' } })];
+  const r = await devin.submitBatch('swe-2-medium', bodies, { fetchImpl: stub.fetchImpl });
+  assert.equal(r.ok, true);
+  assert.deepEqual(JSON.parse(r.batchId), ['s-1', 's-2']);
+  assert.equal(stub.calls.length, 2);
+  assert.equal(stub.calls[0].body.devin_mode, 'swe-2-medium');
+  assert.equal(stub.calls[0].body.structured_output_required, true);
+  assert.deepEqual(stub.calls[0].body.structured_output_schema.properties.answer, { type: 'string' });
+  assert.deepEqual(stub.calls[1].body.structured_output_schema, { type: 'object' }); // item schema passed through
+  assert.match(stub.calls[0].headers.Authorization, /Bearer test-devin-key/);
+  assert.match(stub.calls[0].url, /\/v3\/organizations\/org-test\/sessions$/);
+}));
+
+test('devin batch: getBatch aggregates per-item states', withDevinAuth(async () => {
+  // s-1 has output, s-2 still running -> in_progress
+  const stub1 = stubFetch([
+    { status: 200, data: { structured_output: { answer: 'A' }, status: 'running' } },
+    { status: 200, data: { structured_output: null, status: 'running' } },
+  ]);
+  const r1 = await devin.getBatch(JSON.stringify(['s-1', 's-2']), { fetchImpl: stub1.fetchImpl });
+  assert.equal(r1.status, 'in_progress');
+
+  // s-1 output, s-2 errored terminal -> completed with per-item results
+  const stub2 = stubFetch([
+    { status: 200, data: { structured_output: { answer: 'A' }, status: 'running' } },
+    { status: 200, data: { structured_output: null, status: 'error', status_detail: 'crashed' } },
+  ]);
+  const r2 = await devin.getBatch(JSON.stringify(['s-1', 's-2']), { fetchImpl: stub2.fetchImpl });
+  assert.equal(r2.status, 'completed');
+  const byId = devin.batchResultMap(r2.results);
+  assert.deepEqual(byId.get('c0'), { structured_output: { answer: 'A' } });
+  assert.match(byId.get('c1').error.message, /session error.*crashed/);
+}));
+
+test('devin batch: end-to-end aligned results + journal records', withDevinAuth(async () => {
+  const f = fixture();
+  try {
+    const stub = stubFetch([
+      { status: 200, data: { session_id: 's-1' } },
+      { status: 200, data: { session_id: 's-2' } },
+      { status: 200, data: { structured_output: { answer: 'A' }, status: 'running' } },
+      { status: 200, data: { structured_output: { answer: 'B' }, status: 'running' } },
+    ]);
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'}], {model:'swe-2-medium'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const res = await f.run({ adapter: devin, fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', 'B']);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.equal(loaded.batches.length, 1);
+    assert.deepEqual(JSON.parse(loaded.batches[0].batch_id), ['s-1', 's-2']);
+    assert.equal(loaded.settled.get(0).result.text, 'A');
+    assert.equal(loaded.settled.get(1).result.text, 'B');
+  } finally { f.cleanup(); }
+}));
+
+test('devin batch: resume re-polls journaled session ids — zero new sessions', withDevinAuth(async () => {
+  const f = fixture();
+  try {
+    const scriptPath = f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'}], {model:'swe-2-medium'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    // Seed bodies exactly as batch() builds them — default label is batch-<i>.
+    const bodies = [{ prompt: 'p0' }, { prompt: 'p1' }].map((s, i) => devin.batchBody({ ...s, label: `batch-${i}`, model: 'swe-2-medium' }));
+    const hash = createHash('sha256').update(JSON.stringify({ model: 'swe-2-medium', bodies })).digest('hex').slice(0, 16);
+    const prior = Journal.create(f.dir, { runId: 'run-d', script: 'w.mjs', harness: 'devin' });
+    prior.append({ type: 'batch', batch_id: JSON.stringify(['s-1', 's-2']), firstI: 0, count: 2, model: 'swe-2-medium', hash });
+    prior.append({ type: 'run-end', reason: 'interrupted' });
+
+    const stub = stubFetch([
+      { status: 200, data: { structured_output: { answer: 'A' }, status: 'running' } },
+      { status: 200, data: { structured_output: { answer: 'B' }, status: 'running' } },
+    ]);
+    const res = await f.run({ adapter: devin, resumeId: 'run-d', fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', 'B']);
+    assert.equal(stub.calls.filter((c) => c.method === 'POST').length, 0);
+    assert.match(stub.calls[0].url, /\/sessions\/s-1$/);
+  } finally { f.cleanup(); }
+}));
+
+test('devin batch: partial submit failure settles only that index', withDevinAuth(async () => {
+  const f = fixture();
+  try {
+    const stub = stubFetch([
+      { status: 200, data: { session_id: 's-1' } },
+      { status: 500, data: { error: { message: 'quota exceeded' } } },
+      { status: 200, data: { structured_output: { answer: 'A' }, status: 'running' } },
+    ]);
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'}], {model:'swe-2-medium'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const res = await f.run({ adapter: devin, fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', null]);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.match(loaded.settled.get(1).error.message, /quota exceeded/);
+  } finally { f.cleanup(); }
+}));
+
+test('devin batch: terminal session without output is a per-item error', withDevinAuth(async () => {
+  const f = fixture();
+  try {
+    const stub = stubFetch([
+      { status: 200, data: { session_id: 's-1' } },
+      { status: 200, data: { structured_output: null, status: 'suspended', status_detail: 'inactivity' } },
+    ]);
+    f.writeScript(`const r = await batch([{prompt:'p0'}], {model:'swe-2-medium'});
+log('RESULT:' + JSON.stringify(r));`);
+    const res = await f.run({ adapter: devin, fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), [null]);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.match(loaded.settled.get(0).error.message, /suspended.*without output/);
+  } finally { f.cleanup(); }
+}));
+
+test('devin batch: missing cloud credentials fails cleanly', async () => {
+  const f = fixture();
+  const savedHome = process.env.HOME;
+  try {
+    process.env.HOME = mkdtempSync(join(tmpdir(), 'af-nohome-')); // hide CLI creds
+    delete process.env.DEVIN_API_KEY;
+    delete process.env.DEVIN_ORG_ID;
+    const r = await devin.submitBatch('swe-2-medium', [{ prompt: 'p' }], { fetchImpl: async () => { throw new Error('must not fetch'); } });
+    assert.equal(r.ok, false);
+    assert.match(r.error.message, /no cloud credentials/);
+  } finally {
+    process.env.HOME = savedHome;
+    f.cleanup();
   }
 });

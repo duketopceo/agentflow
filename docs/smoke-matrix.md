@@ -67,3 +67,21 @@ follow-up; `--cache` + `--resume` already bound re-run cost.
 Note for operators: OR batch turnaround on cheap flash slugs can exceed an
 hour in queue. `batch()` fits latency-tolerant stages only — keep
 `batchTimeoutMs` sized to your tolerance (default 2h; window is 24h).
+
+## Batch on devin (2026-10-11, live /v3 sessions)
+
+`agentflow run devbatch.mjs --harness devin` — 3 prompts on `swe-2-medium`,
+one Devin Cloud session per item (`POST /v3/organizations/{org}/sessions`,
+`structured_output_required` → `{answer}`). Journal: one `batch` record with
+the composite id (3 session ids), then 3 `agent` records at indices 0–2.
+
+| Step | Result |
+|---|---|
+| submit 3 sessions + journal ids | verified — `["057f113d...","1bbdf5ca...","b39b2181..."]` |
+| poll → `structured_output` per item | verified — 3/3 aligned results `["AA","BB","CC"]` |
+| wall latency | 33.8s for 3 sessions — vs OR batch backlog the same evening |
+| spend | free (`swe-2` tier; sessions observed at 0.0 ACUs) |
+
+Operator note: a Devin session idles at `waiting_for_user` after producing
+`structured_output` — completion is output-present, not status-terminal.
+Sessions also carry `max_acu_limit`; swe-2 models observed consuming 0.0.

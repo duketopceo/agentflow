@@ -1,4 +1,4 @@
-import { extractJson, withSchemaPrompt, classifyFailure } from './base.mjs';
+import { extractJson, withSchemaPrompt, classifyFailure, batchResultMap } from './base.mjs';
 
 // Direct OpenRouter /chat/completions call — no subprocess, no agent loop, no
 // tools. The cheapest `agent()` surface: use for decompose/classify/verify/
@@ -121,11 +121,7 @@ export default {
   // Normalize whatever shape /batches returns for results into
   // Map custom_id -> response body (a chat-completions-shaped object).
   batchResultMap(results) {
-    const byId = new Map();
-    const put = (cid, v) => { if (cid != null) byId.set(cid, v?.result ?? v?.response ?? v); };
-    if (Array.isArray(results)) for (const r of results) put(r?.custom_id, r);
-    else if (results && typeof results === 'object') for (const [k, v] of Object.entries(results)) put(k, v);
-    return byId;
+    return batchResultMap(results);
   },
 
   // Turn one batch result entry (a chat-completions body) into the same

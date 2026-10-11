@@ -138,3 +138,14 @@ export async function probeBinary(adapter) {
   if (missing.length) notes.push(`flags not found in --help: ${missing.join(', ')}`);
   return { ok: missing.length === 0, name: adapter.name, bin: adapter.bin, path, missingFlags: missing, notes };
 }
+
+// Normalize batch results into Map custom_id -> response body. Handles both
+// the array-of-entries and keyed-object shapes providers return; adapters
+// emit [{custom_id, result}] arrays from their own getBatch.
+export function batchResultMap(results) {
+  const byId = new Map();
+  const put = (cid, v) => { if (cid != null) byId.set(cid, v?.result ?? v?.response ?? v); };
+  if (Array.isArray(results)) for (const r of results) put(r?.custom_id, r);
+  else if (results && typeof results === 'object') for (const [k, v] of Object.entries(results)) put(k, v);
+  return byId;
+}

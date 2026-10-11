@@ -85,3 +85,23 @@ the composite id (3 session ids), then 3 `agent` records at indices 0–2.
 Operator note: a Devin session idles at `waiting_for_user` after producing
 `structured_output` — completion is output-present, not status-terminal.
 Sessions also carry `max_acu_limit`; swe-2 models observed consuming 0.0.
+
+## Batch on perplexity (2026-10-11, live /v1/async/sonar)
+
+`agentflow run b.mjs --harness perplexity` — 2 items, one async sonar
+request each (`POST /v1/async/sonar {request: {model, messages}}` → poll by
+request id; composite JSON slot list, same pattern as devin).
+
+| Step | Result |
+|---|---|
+| submit 2 requests + journal ids | verified — `["req-…","req-…"]` composite `batch_id` |
+| poll → `COMPLETED` + `response` | verified — 2/2 aligned, 113s wall |
+| sync `agent()` on `sonar` | verified — grounded answer in 1.8s, `citations` flow into the result |
+| spend | two `sonar-deep-research` reports (17 + 15 citations) + one `sonar` lookup — cents |
+
+Operator note: **async accepts `sonar-deep-research` only** — the API
+rejects other models with "Async processing is only available for
+sonar-deep-research". That is the right batch model anyway (long cited
+reports ~1–4min each); use `sonar`/`sonar-pro` for sync `agent()` calls.
+Sonar async is slated for deprecation 2026-09-27 — Agent API
+`/v1/responses` (same submit/retrieve shape) is the migration path.

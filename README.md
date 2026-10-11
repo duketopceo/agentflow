@@ -29,9 +29,11 @@ const good = results.filter(Boolean);
 
 Globals inside a script: `agent()`, `parallel()`, `pipeline()`, `batch()`,
 `phase()`, `log()`, `args`. `batch()` fans out through the harness's async
-surface — one OR Batch job on `--harness openrouter` (~40–60% cheaper), or
+surface — one OR Batch job on `--harness openrouter` (~40–60% cheaper),
 one Devin Cloud session per item on `--harness devin` (`swe-2` models are
-free). Results align to input order; resumable mid-poll.
+free), or one async sonar request per item on `--harness perplexity`
+(grounded, cited answers — the research surface). Results align to input
+order; resumable mid-poll.
 
 ## Install as an agent plugin
 
@@ -43,8 +45,8 @@ The repo carries a manifest for each harness; all resolve to the shared
 | Devin | `devin plugins install -y duketopceo/agentflow` (or `--local /path/to/agentflow`) — reads `.devin-plugin/`; auto-installs the compound-engineering plugin via `requiredPlugins` |
 | Claude Code | `claude plugin marketplace add duketopceo/agentflow` → `.claude-plugin/` — though inside Claude, prefer the native Workflow tool |
 | Codex | `codex plugin marketplace add duketopceo/agentflow` → `.codex-plugin/` |
-| OpenCode | `opencode plugin github:duketopceo/agentflow` — native plugin with `agentflow_run`/`agentflow_doctor` tools; see `.opencode/INSTALL.md` |
-| Ori/OpenRouter | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` or `--via ori` |
+| OpenCode | `opencode plugin add github:duketopceo/agentflow` — native plugin with `agentflow_run`/`agentflow_doctor` tools; see `.opencode/INSTALL.md` |
+| Ori/OpenRouter/Perplexity | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` / `--harness perplexity` or `--via ori` |
 
 <sub>Install rows verified from a scratch HOME on 2026-10-10 against the
 public repo. agentflow is not published to npm — the plugin manifests above

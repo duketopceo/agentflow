@@ -364,11 +364,11 @@ export async function runScript(opts) {
             const byId = adapter.batchResultMap(b.results);
             return { items: settleAll((spec, i, k) => adapter.batchItemResult(byId.get(`c${k}`), spec)) };
           } else if (b.status === 'failed' || b.status === 'expired' || b.status === 'cancelled') {
-            const error = { message: `openrouter: batch ${b.status}${b.error?.message ? ` — ${b.error.message}` : ''}`, permissionDenied: false, timedOut: false };
+            const error = { message: `${adapter.name}: batch ${b.status}${b.error?.message ? ` — ${b.error.message}` : ''}`, permissionDenied: false, timedOut: false };
             return { items: settleAll(() => ({ ok: false, error })) };
           }
           if (Date.now() > deadline) {
-            const error = { message: `openrouter: batch ${batchId} did not complete within ${timeoutMs}ms`, permissionDenied: false, timedOut: true };
+            const error = { message: `${adapter.name}: batch ${batchId} did not complete within ${timeoutMs}ms`, permissionDenied: false, timedOut: true };
             return { items: settleAll(() => ({ ok: false, error })) };
           }
           await sleep(batchOpts.batchPollMs ?? batchPollMs);

@@ -11,6 +11,7 @@ import { runScript } from '../src/runtime.mjs';
 import { Journal } from '../src/journal.mjs';
 import openrouter from '../src/adapters/openrouter.mjs';
 import devin from '../src/adapters/devin.mjs';
+import perplexity from '../src/adapters/perplexity.mjs';
 import echo from '../src/adapters/echo.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -437,3 +438,78 @@ test('devin batch: missing cloud credentials fails cleanly', async () => {
     f.cleanup();
   }
 });
+
+// --- perplexity (async sonar requests, composite id like devin) ---
+
+function withPplxKey(fn) {
+  return async () => {
+    process.env.PERPLEXITY_API_KEY = 'test-pplx';
+    try { await fn(); } finally { delete process.env.PERPLEXITY_API_KEY; }
+  };
+}
+
+const pplxDone = (text) => ({ status: 'COMPLETED', response: { choices: [{ message: { content: text } }] } });
+
+test('perplexity batch: end-to-end aligned results + journal records', withPplxKey(async () => {
+  const f = fixture();
+  try {
+    const stub = stubFetch([
+      { status: 200, data: { id: 'req-1', status: 'CREATED' } },
+      { status: 200, data: { id: 'req-2', status: 'CREATED' } },
+      { status: 200, data: pplxDone('A') },
+      { status: 200, data: pplxDone('B') },
+    ]);
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'}], {model:'sonar'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const res = await f.run({ adapter: perplexity, fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', 'B']);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.equal(loaded.batches.length, 1);
+    assert.deepEqual(JSON.parse(loaded.batches[0].batch_id), ['req-1', 'req-2']);
+    assert.equal(loaded.settled.get(0).result.text, 'A');
+    assert.equal(loaded.settled.get(1).result.text, 'B');
+  } finally { f.cleanup(); }
+}));
+
+test('perplexity batch: resume re-polls journaled request ids — zero new submits', withPplxKey(async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'}], {model:'sonar'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const bodies = [{ prompt: 'p0' }, { prompt: 'p1' }].map((s, i) => perplexity.batchBody({ ...s, label: `batch-${i}`, model: 'sonar' }));
+    const hash = createHash('sha256').update(JSON.stringify({ model: 'sonar', bodies })).digest('hex').slice(0, 16);
+    const prior = Journal.create(f.dir, { runId: 'run-p', script: 'w.mjs', harness: 'perplexity' });
+    prior.append({ type: 'batch', batch_id: JSON.stringify(['req-1', 'req-2']), firstI: 0, count: 2, model: 'sonar', hash });
+    prior.append({ type: 'run-end', reason: 'interrupted' });
+
+    const stub = stubFetch([
+      { status: 200, data: pplxDone('A') },
+      { status: 200, data: pplxDone('B') },
+    ]);
+    const res = await f.run({ adapter: perplexity, resumeId: 'run-p', fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', 'B']);
+    assert.equal(stub.calls.filter((c) => c.method === 'POST').length, 0);
+    assert.match(stub.calls[0].url, /\/v1\/async\/sonar\/req-1$/);
+  } finally { f.cleanup(); }
+}));
+
+test('perplexity batch: per-item FAILED settles only that index', withPplxKey(async () => {
+  const f = fixture();
+  try {
+    const stub = stubFetch([
+      { status: 200, data: { id: 'req-1' } },
+      { status: 200, data: { id: 'req-2' } },
+      { status: 200, data: pplxDone('A') },
+      { status: 200, data: { status: 'FAILED', error_message: 'content filter' } },
+    ]);
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'}], {model:'sonar'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const res = await f.run({ adapter: perplexity, fetchImpl: stub.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', null]);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.match(loaded.settled.get(1).error.message, /content filter/);
+  } finally { f.cleanup(); }
+}));

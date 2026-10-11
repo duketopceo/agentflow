@@ -50,7 +50,7 @@ replays settled results and re-runs only what never finished.
 | `agent` | `(prompt, opts?) => Promise<{text, json} \| null>` | opts: `label`, `model`, `schema`, `worktree`, `cwd`, `timeout` (ms), `permission` |
 | `parallel` | `(thunks) => Promise<results>` | `parallel(files.map(f => () => agent(...)))` — order preserved, `null` per failure |
 | `pipeline` | `(items, ...stages) => Promise<results>` | each item flows through stages; `null` short-circuits that item |
-| `batch` | `(items, opts?) => Promise<results>` | **openrouter only** — OR Batch API: one async job per N prompts, ~40–60% off for ≤24h latency-tolerant work. Items: `{prompt, label?, model?, schema?}`; all share ONE model (`opts.model` or per-item). opts: `batchPollMs` (15s), `batchTimeoutMs` (2h). Results align to input order; each item consumes a normal call index |
+| `batch` | `(items, opts?) => Promise<results>` | async fan-out on **openrouter** (one OR Batch job per N prompts, ~40–60% off, ≤24h window) or **devin** (N cloud sessions via `/v3` API — `devin_mode` model, `structured_output` collected; swe-2 models are free). Items: `{prompt, label?, model?, schema?}`; all share ONE model (`opts.model` or per-item). opts: `batchPollMs` (15s), `batchTimeoutMs` (2h). Results align to input order; each item consumes a normal call index |
 | `phase` | `(name) => void` | labels stderr progress |
 | `log` | `(msg) => void` | stderr; keep secrets out |
 | `args` | array | args after `--` on the CLI |
@@ -82,9 +82,12 @@ Constraints:
 `openrouter` is the cheapest surface — use it for tool-free stages
 (decompose, classify, verify prose, synthesize); harness adapters only where
 agents need the filesystem. For latency-tolerant volume, `batch(items)`
-submits one OR Batch job instead of N sync calls — the run polls until the
-batch completes (interrupt mid-poll is safe: `--resume` re-polls the same
-batch id, never resubmits). The model must be batch-capable on OR.
+runs the harness's async-jobs surface instead of N sync calls — the run
+polls until done (interrupt mid-poll is safe: `--resume` re-polls the same
+journaled ids, never resubmits). On openrouter that's one `/batches` job
+(model must be batch-capable); on devin it's one Cloud session per item
+(`structured_output` is the result channel, sessions idle at
+`waiting_for_user` once produced — that is the completion signal).
 
 **`--via ori`** wraps workers in Ori's OpenRouter environment
 (`ori claude -p ...`) — the harness keeps its own flags and parsing, but

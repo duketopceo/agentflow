@@ -104,12 +104,16 @@ test('runAgentflow: doctor returns non-empty combined output', async () => {
 
 // --- v1 entry --------------------------------------------------------------
 
-test('v1 entry: default export exposes the server() plugin function', async () => {
+// Node <22.18 cannot import .ts (no type stripping) — the entry tests below
+// load the real plugin files, so gate them on the runtime capability.
+const canImportTs = typeof process.features?.typescript === 'string';
+
+test('v1 entry: default export exposes the server() plugin function', { skip: !canImportTs }, async () => {
   const mod = await import('../plugins/agentflow/v1.ts');
   assert.equal(typeof mod.default.server, 'function');
 });
 
-test('v1 entry: registers both tools and returns run output carrying the run-id', async () => {
+test('v1 entry: registers both tools and returns run output carrying the run-id', { skip: !canImportTs }, async () => {
   const mod = await import('../plugins/agentflow/v1.ts');
   const hooks = await withFakebin(() => mod.default.server({ directory: tmpdir() }));
   assert.deepEqual(Object.keys(hooks.tool).sort(), ['agentflow_doctor', 'agentflow_run']);
@@ -120,13 +124,13 @@ test('v1 entry: registers both tools and returns run output carrying the run-id'
 
 // --- v2 entry --------------------------------------------------------------
 
-test('v2 entry: default export is a Plugin.define with a stable id and setup', async () => {
+test('v2 entry: default export is a Plugin.define with a stable id and setup', { skip: !canImportTs }, async () => {
   const mod = await import('../plugins/agentflow/v2.ts');
   assert.equal(mod.default.id, 'agentflow', 'v2 plugin needs a stable id for storage scoping');
   assert.equal(typeof mod.default.setup, 'function');
 });
 
-test('v2 entry: setup() registers both tools against a real ctx.tool transform', async () => {
+test('v2 entry: setup() registers both tools against a real ctx.tool transform', { skip: !canImportTs }, async () => {
   const mod = await import('../plugins/agentflow/v2.ts');
   const added = [];
   const disposed = { called: false };
@@ -146,7 +150,7 @@ test('v2 entry: setup() registers both tools against a real ctx.tool transform',
   assert.ok(disposed.called, 'setup must return a cleanup that disposes the registration');
 });
 
-test('v2 entry: setup() degrades quietly when the context has no tool domain', async () => {
+test('v2 entry: setup() degrades quietly when the context has no tool domain', { skip: !canImportTs }, async () => {
   // Regression guard. An earlier draft called ctx.tool.transform unguarded and
   // threw `Cannot read properties of undefined` — and because setup is awaited
   // at load, that kills the plugin instead of degrading it.
@@ -155,7 +159,7 @@ test('v2 entry: setup() degrades quietly when the context has no tool domain', a
   await assert.doesNotReject(() => mod.default.setup(ctx));
 });
 
-test('v2 entry: run tool returns { content } and captures the run-id', async () => {
+test('v2 entry: run tool returns { content } and captures the run-id', { skip: !canImportTs }, async () => {
   const mod = await import('../plugins/agentflow/v2.ts');
   const added = [];
   const ctx = {

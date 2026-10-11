@@ -223,4 +223,14 @@ test('bigNumber renders block digits; done frame ends with spend card', () => {
   const f2 = renderFrame(usd, { width: 90 });
   assert.match(f2, /total spend/);
   assert.match(f2.split('\n').find((l) => l.includes('█')), /██/);
+
+  const free = foldState(recs([
+    { type: 'agent', i: 0, ok: true, result: { text: 'x', usage: { costUsd: 0 } }, at: 't' },
+    { type: 'run-end', reason: 'ok', at: 't' },
+  ]));
+  const f3 = renderFrame(free, { width: 90 });
+  // "$0.00" renders as block glyphs, not literal text — assert the card
+  // chosen is the dollar one, not the token fallback.
+  assert.match(f3, /total spend/, 'a reported $0 spend still gets the dollar card');
+  assert.doesNotMatch(f3, /total tokens/);
 });

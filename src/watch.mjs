@@ -136,15 +136,16 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
 
   const nAbandoned = lanes.filter((l) => l.state === 'abandoned').length;
   const tot = lanes.reduce((a, l) => (l.usage
-    ? { p: a.p + (l.usage.promptTokens ?? 0), c: a.c + (l.usage.completionTokens ?? 0), usd: a.usd + (l.usage.costUsd ?? 0), n: a.n + 1 }
-    : a), { p: 0, c: 0, usd: 0, n: 0 });
+    ? { p: a.p + (l.usage.promptTokens ?? 0), c: a.c + (l.usage.completionTokens ?? 0), usd: a.usd + (l.usage.costUsd ?? 0), usdSeen: a.usdSeen || l.usage.costUsd != null, n: a.n + 1 }
+    : a), { p: 0, c: 0, usd: 0, usdSeen: false, n: 0 });
   const tokTotal = tot.n ? `  tok ${fmtTok(tot.p)}/${fmtTok(tot.c)}` : '';
 
   if (state.done) {
     lines.push(`run ${state.done.reason} — ok ${nOk} failed ${nFail} abandoned ${nAbandoned}${tokTotal}`);
     // The payoff: total spend, large. costUsd wins when a harness reports
-    // dollars (claude); tokens are the spend proxy everywhere else.
-    if (tot.usd) {
+    // dollars (claude); tokens are the spend proxy everywhere else. usdSeen
+    // not usd — a genuinely free $0.00 run still gets the dollar card.
+    if (tot.usdSeen) {
       lines.push('', ...bigNumber(`$${tot.usd.toFixed(2)}`).split('\n'), '     total spend');
     } else if (tot.n) {
       lines.push('', ...bigNumber(fmtTok(tot.p + tot.c)).split('\n'), '     total tokens (in+out)');

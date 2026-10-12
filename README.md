@@ -67,8 +67,8 @@ The repo carries a manifest for each harness; all resolve to the shared
 | Harness | Install |
 |---|---|
 | Devin | `devin plugins install -y duketopceo/agentflow` (or `--local /path/to/agentflow`) — reads `.devin-plugin/`; auto-installs the compound-engineering plugin via `requiredPlugins` |
-| Claude Code | `claude plugin marketplace add duketopceo/agentflow` → `.claude-plugin/` — though inside Claude, prefer the native Workflow tool |
-| Codex | `codex plugin marketplace add duketopceo/agentflow` → `.codex-plugin/` |
+| Claude Code | `claude plugin marketplace add duketopceo/agentflow` then `claude plugin install agentflow@agentflow` → `.claude-plugin/` (live-verified) — though inside Claude, prefer the native Workflow tool |
+| Codex | `codex plugin marketplace add duketopceo/agentflow` then `codex plugin add agentflow@agentflow` → `.codex-plugin/` (live-verified) |
 | OpenCode | v1 `1.18.29+`: `opencode plugin github:duketopceo/agentflow` → `plugins/agentflow/v1.mjs` (live-verified). v2: `opencode plugin github:duketopceo/agentflow#main::path:plugins/agentflow` → `v2.mjs` (no v2 CLI published yet). Both expose `agentflow_run`/`agentflow_doctor`. See `.opencode/INSTALL.md` |
 | Factory Droid | `droid plugin marketplace add duketopceo/agentflow` — `.factory-plugin/` native (`.claude-plugin/` also auto-translates); ships the `worker` droid |
 | Copilot CLI | `copilot plugin install duketopceo/agentflow` (verified: skill installs); MCP via `copilot mcp add agentflow -- agentflow mcp` |
@@ -77,7 +77,7 @@ The repo carries a manifest for each harness; all resolve to the shared
 | Any MCP client | `agentflow mcp` — the `.mcp.json` at repo root wires it (Crush, Claude Desktop, Zed, Roo, Kiro…). Tools: `agentflow_run`/`doctor`/`status`/`tail`/`stop` |
 | Ori/OpenRouter/Perplexity | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` / `--harness perplexity` or `--via ori` |
 
-<sub>Devin, OpenCode v1, Gemini (extension + MCP server) and the universal
+<sub>Devin, OpenCode v1, Claude Code, Codex, Gemini (extension + MCP server), the universal
 skills registry, and Copilot rows are live-verified; Factory/Cursor rows are
 manifest-verified (GUI/no-binary installs). agentflow is not published to npm — the plugin manifests above
 (or a clone + `npm link`) are the install path.</sub>

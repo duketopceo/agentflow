@@ -76,8 +76,9 @@ The repo carries a manifest for each harness; all resolve to the shared
 | Gemini CLI | `gemini extensions install https://github.com/duketopceo/agentflow` — `gemini-extension.json` loads the skill as context |
 | Ori/OpenRouter/Perplexity | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` / `--harness perplexity` or `--via ori` |
 
-<sub>Install rows verified from a scratch HOME on 2026-10-10 against the
-public repo. agentflow is not published to npm — the plugin manifests above
+<sub>Devin and OpenCode v1 rows live-verified from a scratch HOME on 2026-10-10;
+Factory/Copilot/Cursor/Gemini rows are manifest-verified, not yet
+live-installed. agentflow is not published to npm — the plugin manifests above
 (or a clone + `npm link`) are the install path.</sub>
 
 ## Quick start

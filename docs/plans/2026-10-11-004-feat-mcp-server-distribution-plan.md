@@ -52,9 +52,12 @@ agents/droids, hooks).
 - **R3.** The MCP tool surface is `run`, `doctor`, `status`, `tail`, `stop` —
   the verbs an agent needs mid-run. `watch` is excluded (alternate-screen TTY);
   `resume` is a `--resume` argument on `run`, not a separate tool.
-- **R4.** External submissions executed: `cline/marketplace` entry,
-  `block/agent-skills` skill folder, cursor.directory listing; awesome-list
-  PRs optional.
+- **R4.** External submissions executed where the surface accepts
+  automation: `cline/marketplace` entry PR, `block/agent-skills` skill PR
+  (or documented supersession), cursor.directory. Surfaces that only accept
+  an interactive web form (cursor.directory today) are satisfied by a
+  staged, click-ready submission record in `docs/submissions.md`; awesome-
+  list PRs are optional.
 - **R5.** The npm publish path is documented end-to-end with the name verified
   (`agentflow` unclaimed as of 2026-10-11 — 404 on `npm view agentflow` and
   `@duketopceo/agentflow`); the publish command itself stays the user's manual
@@ -322,7 +325,7 @@ verified, explicitly unverified, or a documented manual step.
   with zero new runtime deps.
 - Every manifest that can carry `mcpServers` does; OpenCode keeps its native
   tools (no MCP needed there).
-- External submissions fired (PRs open) or the one manual web-form step is
-  staged verbatim.
+- External submissions fired (PRs open) and the one manual web-form step is
+  staged verbatim per R4.
 - npm runbook written; `private` flag untouched.
 - Suite green; no abandoned-attempt code left in the diff.

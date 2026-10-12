@@ -13,14 +13,17 @@ crawled directory) in each. Last audited 2026-10-11.
 | 3 | **Claude Code** | plugin marketplaces | `.claude-plugin/{plugin,marketplace}.json` | `claude plugin marketplace add duketopceo/agentflow` — repo is the marketplace | ✅ ships (install unverified end-to-end) |
 | 4 | **Codex** | plugin marketplaces | `.codex-plugin/plugin.json` | `codex plugin marketplace add duketopceo/agentflow` | ✅ ships (unverified) |
 | 5 | **Factory Droid** | plugins + droids | `.factory-plugin/plugin.json` + `droids/worker.md` (`.claude-plugin/` also auto-translates) | `droid plugin marketplace add duketopceo/agentflow` | 🟡 native artifact shipped — install unverified |
-| 6 | **Copilot CLI** | plugins (Agent Plugins 1.0) | root `plugin.json` carries `$schema`; `skills/` dir discovered by convention | `copilot plugin install duketopceo/agentflow` / `marketplace add`; no curated store — repo is the spec | 🟡 manifest conforms — install unverified |
-| 7 | **Cursor** | plugins (native + Agent Plugins) | `.cursor-plugin/plugin.json` (native) + root `plugin.json` (standard) | Official: submit at cursor.com/marketplace/publish (manual review). Community: cursor.directory listing (self-serve, faster) | 🟡 artifacts shipped — listing submission pending |
-| 8 | **Gemini CLI** | extensions | `gemini-extension.json` at root + `gemini-cli-extension` repo topic (set) | Manifest + topic → auto-crawled into geminicli.com/extensions.json registry | 🟡 manifest + topic live — awaiting crawler |
-| 9 | **Cline** | skills/plugins/MCP marketplace | `registry/skills/agentflow/entry.json` in cline/marketplace fork | PR to `cline/marketplace` → publishes to cline.github.io/marketplace catalog | 🔴 external PR needed |
-| 10 | **Goose (Block)** | skills marketplace | `skills/agentflow/` (already shippable) | PR to `block/agent-skills` → block.github.io/goose/skills | 🔴 external PR needed |
+| 6 | **Copilot CLI** | plugins (Agent Plugins 1.0) | root `plugin.json` carries `$schema`; `skills/` dir + `.mcp.json` discovered by convention | `copilot plugin install duketopceo/agentflow` / `marketplace add`; no curated store — repo is the spec | 🟡 manifest conforms — install pending merged ref |
+| 7 | **Cursor** | plugins (native + Agent Plugins) | `.cursor-plugin/plugin.json` (native) + root `plugin.json` (standard) | Official: submit at cursor.com/marketplace/publish (manual review). Community: cursor.directory listing (self-serve, faster) | 🟡 artifacts shipped — GUI install; cursor.directory staged in `docs/submissions.md` |
+| 8 | **Gemini CLI** | extensions | `gemini-extension.json` at root + `gemini-cli-extension` repo topic (set) | `gemini extensions install <repo>` — also crawls topic into geminicli.com registry | ✅ **live-verified**: `extensions link` + `mcp list` shows `agentflow … Connected` (2026-10-11) |
+| 9 | **Cline** | skills/plugins/MCP marketplace | `registry/skills/agentflow/entry.json` | PR to `cline/marketplace` → publishes to catalog | 🟡 PR open: [cline/marketplace#224](https://github.com/cline/marketplace/pull/224) (validated 204 entries) |
+| 10 | **Goose (Block)** | universal skills registry | `skills/agentflow/SKILL.md` | `npx skills add duketopceo/agentflow` (block/agent-skills archived — superseded) | ✅ install-verified via `npx skills` (2026-10-11) |
+| 11 | **Any MCP client** (Crush, Zed, Claude Desktop, Roo, Kilo, Kiro, Windsurf…) | MCP stdio | `.mcp.json` + `agentflow mcp` | `{"agentflow": {"command": "agentflow", "args": ["mcp"]}}` in the client's mcp config | ✅ stdio contract suite-tested; Gemini+Crush wired live |
 
 ## Publish-ready artifacts (shipped)
 
+- `agentflow mcp` — zero-dep stdio MCP server (`src/mcp.mjs`): `agentflow_run`/`doctor`/`status`/`tail`/`stop`
+- `.mcp.json` at root → canonical server block; `.claude-plugin/` + `.codex-plugin/` reference it; `.cursor-plugin/`, `.factory-plugin/`, `gemini-extension.json` carry it inline
 - root `plugin.json` → `$schema` Agent Plugins 1.0 → satisfies Copilot CLI AND Cursor's open-standard path (`skills/` discovered by directory convention — a `skills` field is rejected by the schema)
 - `gemini-extension.json` → `{name, version, description, contextFileName}` — skill content via context file
 - `.factory-plugin/plugin.json` + `droids/worker.md` → native Droid instead of compat translation

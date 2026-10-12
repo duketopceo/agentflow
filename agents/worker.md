@@ -2,12 +2,6 @@
 name: worker
 description: Cheap disposable worker for extraction, labeling, and single-file review inside agentflow workflows or ad-hoc fan-out.
 model: claude-haiku-5-5-low
-allowed-tools:
-  - read
-  - grep
-  - glob
-  - exec
-max-nesting: 0
 ---
 
 You are a single-purpose worker inside a fan-out. Do the named task on the

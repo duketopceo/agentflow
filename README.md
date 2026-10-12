@@ -73,12 +73,13 @@ The repo carries a manifest for each harness; all resolve to the shared
 | Factory Droid | `droid plugin marketplace add duketopceo/agentflow` — `.factory-plugin/` native (`.claude-plugin/` also auto-translates); ships the `worker` droid |
 | Copilot CLI | `copilot plugin install duketopceo/agentflow` — root `plugin.json` (Agent Plugins 1.0) |
 | Cursor | `.cursor-plugin/` native; submit listing via cursor.directory or cursor.com/marketplace/publish — root `plugin.json` also covers the open standard |
-| Gemini CLI | `gemini extensions install https://github.com/duketopceo/agentflow` — `gemini-extension.json` loads the skill as context |
+| Gemini CLI | `gemini extensions install https://github.com/duketopceo/agentflow` — verified live: `gemini mcp list` shows `agentflow` connected |
+| Any MCP client | `agentflow mcp` — the `.mcp.json` at repo root wires it (Crush, Claude Desktop, Zed, Roo, Kiro…). Tools: `agentflow_run`/`doctor`/`status`/`tail`/`stop` |
 | Ori/OpenRouter/Perplexity | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` / `--harness perplexity` or `--via ori` |
 
-<sub>Devin and OpenCode v1 rows live-verified from a scratch HOME on 2026-10-10;
-Factory/Copilot/Cursor/Gemini rows are manifest-verified, not yet
-live-installed. agentflow is not published to npm — the plugin manifests above
+<sub>Devin, OpenCode v1, Gemini (extension + MCP server) and the universal
+skills registry rows are live-verified; Factory/Copilot/Cursor rows are
+manifest-verified, not yet live-installed. agentflow is not published to npm — the plugin manifests above
 (or a clone + `npm link`) are the install path.</sub>
 
 ## Quick start

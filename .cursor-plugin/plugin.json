@@ -3,13 +3,26 @@
   "displayName": "Agentflow",
   "version": "0.2.0",
   "description": "Cross-harness dynamic workflows: script-driven multi-agent orchestration for devin, claude, codex, opencode",
-  "author": { "name": "Luke Kimball" },
+  "author": {
+    "name": "Luke Kimball"
+  },
   "repository": "https://github.com/duketopceo/agentflow",
-  "license": "MIT",
-  "keywords": ["workflows", "orchestration", "multi-agent", "parallel-agents", "agent-harness"],
+  "license": "AGPL-3.0-only",
+  "keywords": [
+    "workflows",
+    "orchestration",
+    "multi-agent",
+    "parallel-agents",
+    "agent-harness"
+  ],
   "skills": "./skills/",
   "agents": "./agents/",
   "mcpServers": {
-    "agentflow": { "command": "agentflow", "args": ["mcp"] }
+    "agentflow": {
+      "command": "agentflow",
+      "args": [
+        "mcp"
+      ]
+    }
   }
 }

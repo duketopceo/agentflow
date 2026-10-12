@@ -4,6 +4,12 @@
   "description": "Cross-harness dynamic workflows: script-driven multi-agent orchestration for devin, claude, codex, opencode",
   "contextFileName": "skills/agentflow/SKILL.md",
   "mcpServers": {
-    "agentflow": { "command": "agentflow", "args": ["mcp"] }
-  }
+    "agentflow": {
+      "command": "agentflow",
+      "args": [
+        "mcp"
+      ]
+    }
+  },
+  "license": "AGPL-3.0-only"
 }

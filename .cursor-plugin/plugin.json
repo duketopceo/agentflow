@@ -8,5 +8,8 @@
   "license": "MIT",
   "keywords": ["workflows", "orchestration", "multi-agent", "parallel-agents", "agent-harness"],
   "skills": "./skills/",
-  "agents": "./agents/"
+  "agents": "./agents/",
+  "mcpServers": {
+    "agentflow": { "command": "agentflow", "args": ["mcp"] }
+  }
 }

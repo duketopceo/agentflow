@@ -21,6 +21,7 @@ usage:
   agentflow clean [--all]          remove worktrees of ended runs
                                    (--all: also sweep unrecorded dirs)
   agentflow watch [run-id]         live view of a run (newest if no id)
+  agentflow mcp                    MCP server over stdio (newline JSON-RPC)
   agentflow doctor
   agentflow list
 
@@ -97,6 +98,12 @@ export async function main(argv = process.argv.slice(2)) {
   if (cmd === 'stop') return stopCmd(cwd, flags._[0]);
   if (cmd === 'clean') return cleanCmd(cwd, flags);
   if (cmd === 'watch') return watchCmd(cwd, flags._[0]);
+
+  if (cmd === 'mcp') {
+    const { serve } = await import('./mcp.mjs');
+    await serve({ cwd });
+    return 0;
+  }
 
   if (cmd === 'doctor') {
     const probes = await Promise.all(Object.entries(adapters).map(async ([name, adapter]) => [name, await adapter.probe()]));

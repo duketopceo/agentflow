@@ -4,18 +4,8 @@
 |---|---|---|---|
 | cline/marketplace | `registry/skills/agentflow/entry.json` PR from fork `duketopceo/af-cline-marketplace` (`npm run validate` passed: 204 entries) | PR open | https://github.com/cline/marketplace/pull/224 |
 | block/agent-skills (Goose) | **repo archived** — superseded by the universal skills registry | not needed | `npx skills add duketopceo/agentflow` verified live 2026-10-11 (finds `skills/agentflow/SKILL.md`) |
-| cursor.directory | self-serve listing | **manual step** | submit repo URL + description below at https://cursor.directory |
-| cursor.com/marketplace/publish | official curated listing | optional follow-up | manual review flow |
-
-## cursor.directory submission (manual — web form)
-
-- **Repo URL:** `https://github.com/duketopceo/agentflow`
-- **Name:** agentflow
-- **Tagline:** Cross-harness dynamic workflows — fan out work to pooled
-  fresh-context agents with journaled results and resume.
-- **Category:** plugins / MCP (repo carries `.cursor-plugin/` + `.mcp.json`)
-- **Install note:** `cursor plugin` reads `.cursor-plugin/`; the MCP server
-  (`agentflow mcp`) is wired in the plugin manifest and the root `.mcp.json`.
+| cursor.directory | self-serve listing | **✅ live** 2026-10-13 — auto-scan pulled MCP server, worker agent, skill, deep-research command | https://cursor.directory/plugins/agentflow |
+| cursor.com/marketplace/publish | official curated listing | **application submitted** 2026-10-13 — manual review via marketplace-publishing@cursor.com | https://cursor.com/marketplace/publish |
 
 ## Notes
 

@@ -21,11 +21,13 @@ Both entries expose the same two tools: `agentflow_run`, `agentflow_doctor`.
 Requires Node.js >= 20 and `agentflow` on PATH (repo `bin/agentflow`, or
 `npm link` inside the repo).
 
-> **v2 status:** the v2 entry is exercised in the test suite (it registers both
-> tools against a `ToolDomain`), but **not yet on a live v2 install** — no
-> v2 CLI is published yet (latest `opencode-ai` is `1.19.0`). The v1 entry is
-> verified working. After a v2 release, confirm the plugin loads and that an
-> `agentflow_doctor` call returns probe output.
+> **v2 status:** live-verified on the v2 beta build (`opencode-ai@beta`
+> `0.0.0-beta-202608110357`, 2026-10-13) — `opencode plugin <repo>` installs,
+> `debug agent build` lists both tools, and
+> `debug agent build --tool agentflow_doctor --params '{}'` executes for real.
+> On this build the default install resolves the `./server` entry — the `server()`
+> contract still loads on v2; `./v2` (`Plugin.define`) remains for releases
+> where `server()` is dropped.
 
 ## Reading a run's output
 

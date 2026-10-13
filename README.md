@@ -67,12 +67,12 @@ The repo carries a manifest for each harness; all resolve to the shared
 | Harness | Install |
 |---|---|
 | Devin | `devin plugins install -y duketopceo/agentflow` (or `--local /path/to/agentflow`) — reads `.devin-plugin/`; auto-installs the compound-engineering plugin via `requiredPlugins` |
-| Claude Code | `claude plugin marketplace add duketopceo/agentflow` then `claude plugin install agentflow@agentflow` → `.claude-plugin/` (live-verified) — though inside Claude, prefer the native Workflow tool |
-| Codex | `codex plugin marketplace add duketopceo/agentflow` then `codex plugin add agentflow@agentflow` → `.codex-plugin/` (live-verified) |
-| OpenCode | v1 `1.18.29+`: `opencode plugin github:duketopceo/agentflow` → `plugins/agentflow/v1.mjs` (live-verified). v2: `opencode plugin github:duketopceo/agentflow#main::path:plugins/agentflow` → `v2.mjs` (no v2 CLI published yet). Both expose `agentflow_run`/`agentflow_doctor`. See `.opencode/INSTALL.md` |
+| Claude Code | `claude plugin marketplace add duketopceo/agentflow` then `claude plugin install agentflow@agentflow` → `.claude-plugin/` (live-verified); MCP via `claude mcp add agentflow --scope user -- agentflow mcp` — though inside Claude, prefer the native Workflow tool |
+| Codex | `codex plugin marketplace add duketopceo/agentflow` then `codex plugin add agentflow@agentflow` → `.codex-plugin/` (live-verified); MCP via `codex mcp add agentflow -- agentflow mcp` |
+| OpenCode | v1 `1.18.29+`: `opencode plugin github:duketopceo/agentflow` → `plugins/agentflow/v1.mjs` (live-verified). v2: verified on `opencode-ai@beta` (`0.0.0-beta-202608110357`) — plugin installs, `agentflow_run`/`agentflow_doctor` register and execute. See `.opencode/INSTALL.md` |
 | Factory Droid | `droid plugin marketplace add duketopceo/agentflow` — `.factory-plugin/` native (`.claude-plugin/` also auto-translates); ships the `worker` droid |
 | Copilot CLI | `copilot plugin install duketopceo/agentflow` (verified: skill installs); MCP via `copilot mcp add agentflow -- agentflow mcp` |
-| Cursor | `.cursor-plugin/` native; submit listing via cursor.directory or cursor.com/marketplace/publish — root `plugin.json` also covers the open standard |
+| Cursor | `.cursor-plugin/` native; **listed at [cursor.directory/plugins/agentflow](https://cursor.directory/plugins/agentflow)**; official marketplace publisher application submitted (manual review) — root `plugin.json` also covers the open standard |
 | Gemini CLI | `gemini extensions install https://github.com/duketopceo/agentflow` — verified live: `gemini mcp list` shows `agentflow` connected |
 | Any MCP client | `agentflow mcp` — the `.mcp.json` at repo root wires it (Crush, Claude Desktop, Zed, Roo, Kiro…). Tools: `agentflow_run`/`doctor`/`status`/`tail`/`stop` |
 | Ori/OpenRouter/Perplexity | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` / `--harness perplexity` or `--via ori` |

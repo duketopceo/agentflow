@@ -1,5 +1,5 @@
 {
-  "name": "agentflow",
+  "name": "@lukedaduke/agentflow",
   "version": "0.2.0",
   "description": "Cross-harness dynamic workflows: script-driven multi-agent orchestration for devin, claude, codex, opencode",
   "type": "module",

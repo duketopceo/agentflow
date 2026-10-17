@@ -19,6 +19,7 @@ crawled directory) in each. Last audited 2026-10-11.
 | 9 | **Cline** | skills/plugins/MCP marketplace | `registry/skills/agentflow/entry.json` | PR to `cline/marketplace` → publishes to catalog | 🟡 PR open: [cline/marketplace#224](https://github.com/cline/marketplace/pull/224) (validated 204 entries) |
 | 10 | **Goose (Block)** | universal skills registry | `skills/agentflow/SKILL.md` | `npx skills add duketopceo/agentflow` (block/agent-skills archived — superseded) | ✅ install-verified via `npx skills` (2026-10-11) |
 | 11 | **Any MCP client** (Crush, Zed, Claude Desktop, Roo, Kilo, Kiro, Windsurf…) | MCP stdio | `.mcp.json` + `agentflow mcp` | `{"agentflow": {"command": "agentflow", "args": ["mcp"]}}` in the client's mcp config | ✅ stdio contract suite-tested; Gemini+Crush wired live |
+| 12 | **npm** | package registry | `package.json` (`@lukedaduke/agentflow`, bin `agentflow`) | granular access token (bypass-2FA, publish+stage) → `npm publish --access public` | ✅ **published 0.2.0** — [npmjs.com/package/@lukedaduke/agentflow](https://www.npmjs.com/package/@lukedaduke/agentflow); install-verified (2026-10-17) |
 
 ## Publish-ready artifacts (shipped)
 

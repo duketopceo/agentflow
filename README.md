@@ -21,16 +21,20 @@ delivered as a portable subprocess runner.
 
 ## Install
 
-Requires Node 20 or newer. From a clone:
+Requires Node 20 or newer.
+
+```bash
+npm install -g @lukedaduke/agentflow   # or: npx @lukedaduke/agentflow
+agentflow doctor                     # which harness CLIs are on PATH
+```
+
+From a clone instead:
 
 ```bash
 git clone https://github.com/duketopceo/agentflow
 cd agentflow
-bin/agentflow doctor        # which harness CLIs are on PATH
+bin/agentflow doctor
 ```
-
-There is no npm package yet (`"private": true`; see [ROADMAP](ROADMAP.md) U5).
-`npm install` is only needed for the OpenCode plugin.
 
 ### As an agent plugin
 
@@ -79,8 +83,9 @@ The repo carries a manifest for each harness; all resolve to the shared
 
 <sub>Devin, OpenCode v1, Claude Code, Codex, Gemini (extension + MCP server), the universal
 skills registry, and Copilot rows are live-verified; Factory/Cursor rows are
-manifest-verified (GUI/no-binary installs). agentflow is not published to npm — the plugin manifests above
-(or a clone + `npm link`) are the install path.</sub>
+manifest-verified (GUI/no-binary installs). Published to npm as
+[`@lukedaduke/agentflow`](https://www.npmjs.com/package/@lukedaduke/agentflow) — the plugin
+manifests above (or `npm i -g`) are the install paths.</sub>
 
 ## Quick start
 

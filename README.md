@@ -81,9 +81,9 @@ The repo carries a manifest for each harness; all resolve to the shared
 | Any MCP client | `agentflow mcp` — the `.mcp.json` at repo root wires it (Crush, Claude Desktop, Zed, Roo, Kiro…). Tools: `agentflow_run`/`doctor`/`status`/`tail`/`stop` |
 | Ori/OpenRouter/Perplexity | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` / `--harness perplexity` or `--via ori` |
 
-<sub>Devin, OpenCode v1, Claude Code, Codex, Gemini (extension + MCP server), the universal
-skills registry, and Copilot rows are live-verified; Factory/Cursor rows are
-manifest-verified (GUI/no-binary installs). Published to npm as
+<sub>Devin, OpenCode v1, Claude Code, Codex, Gemini (extension + MCP server), Factory Droid,
+the universal skills registry, and Copilot rows are live-verified; Cursor's install is
+GUI-only (manifest-verified, cursor.directory listing live). Published to npm as
 [`@lukedaduke/agentflow`](https://www.npmjs.com/package/@lukedaduke/agentflow) — the plugin
 manifests above (or `npm i -g`) are the install paths.</sub>
 

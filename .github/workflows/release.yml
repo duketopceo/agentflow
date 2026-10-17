@@ -1,0 +1,66 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Publish auth: NPM_PUBLISH_KEY secret (granular token) when set, else OIDC
+# trusted publishing — configure on npmjs.com: package → Settings → Trusted
+# Publisher → GitHub Actions, repo duketopceo/agentflow + this file, env `npm`.
+# The `npm` environment should have a required-reviewer rule so every publish
+# is a deliberate approval, not just a tag push.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    env:
+      # Token path when set; falls back to OIDC trusted publishing when absent.
+      NPM_PUBLISH_KEY: ${{ secrets.NPM_PUBLISH_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Node 24 ships npm >=11.5.1, required for trusted publishing.
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm test
+
+      - name: Tag matches package.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p 'require("./package.json").version')"
+          [ "$TAG" = "$PKG" ] || { echo "tag v$TAG != package.json $PKG"; exit 1; }
+
+      - name: Pack
+        run: npm pack --pack-destination /tmp
+
+      # Publish the exact tarball the test step verified — not a repack.
+      - name: Check whether version is already live
+        id: live
+        run: |
+          PKG="$(node -p 'require("./package.json").name')"
+          VER="$(node -p 'require("./package.json").version')"
+          if npm view "${PKG}@${VER}" version >/dev/null 2>&1; then
+            echo "${PKG}@${VER} already published — skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Token auth cannot produce provenance attestations — plain publish.
+      - name: Publish via token
+        if: env.NPM_PUBLISH_KEY != '' && steps.live.outputs.skip != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_KEY }}
+        run: npm publish /tmp/lukedaduke-agentflow-*.tgz --access public
+
+      # OIDC trusted publishing — configured on npmjs.com per package.
+      - name: Publish with provenance (OIDC)
+        if: env.NPM_PUBLISH_KEY == '' && steps.live.outputs.skip != 'true'
+        run: npm publish /tmp/lukedaduke-agentflow-*.tgz --provenance --access public

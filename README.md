@@ -7,6 +7,10 @@
 
 <p align="center"><b>Write a multi-agent workflow once as a script, then run it on <code>devin</code>, <code>claude</code>, <code>codex</code> or <code>opencode</code>.</b></p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@lukedaduke/agentflow"><img src="https://img.shields.io/npm/v/%40lukedaduke%2Fagentflow" alt="npm version"></a>
+</p>
+
 agentflow is a small Node runner. A workflow is an `.mjs` file; each `agent()`
 call spawns one non-interactive CLI session of the harness you pick, under a
 bounded concurrency pool, and every settled result is journaled so a run can be

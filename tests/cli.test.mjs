@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -78,6 +78,25 @@ test('run --run-id honors a caller-provided run id', async () => {
     const r = await cli(['run', 'w.mjs', '--harness', 'echo', '--run-id', 'fixed-id-1'], f.dir);
     assert.equal(r.code, 0);
     assert.ok(existsSync(join(f.dir, '.agentflow', 'runs', 'fixed-id-1.jsonl')));
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('init: creates a minimal config once and preserves an existing config', async () => {
+  const f = fixture();
+  try {
+    const first = await cli(['init'], f.dir);
+    assert.equal(first.code, 0, first.err);
+    const configPath = join(f.dir, 'agentflow.json');
+    assert.deepEqual(JSON.parse(readFileSync(configPath, 'utf8')), { harness: 'devin', concurrency: 8 });
+    assert.ok(!existsSync(join(f.dir, '.agentflow')), 'init must not create run state');
+
+    writeFileSync(configPath, '{"harness":"codex"}\n');
+    const second = await cli(['init'], f.dir);
+    assert.equal(second.code, 0, second.err);
+    assert.equal(readFileSync(configPath, 'utf8'), '{"harness":"codex"}\n');
+    assert.ok(second.out.includes('left unchanged'), second.out);
   } finally {
     f.cleanup();
   }

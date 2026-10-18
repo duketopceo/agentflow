@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, mkdirSync, openSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,7 @@ usage:
   agentflow mcp                    MCP server over stdio (newline JSON-RPC)
   agentflow doctor
   agentflow list
+  agentflow init                   create a minimal project configuration
 
 config: agentflow.json in cwd — {"harness": "devin", "concurrency": 8, "via": "ori"}
 `;
@@ -93,6 +94,8 @@ export async function main(argv = process.argv.slice(2)) {
     return code;
   }
 
+  if (cmd === 'init') return initCmd(cwd);
+
   if (cmd === 'status') return statusCmd(cwd, flags._[0], false);
   if (cmd === 'tail') return statusCmd(cwd, flags._[0], true);
   if (cmd === 'stop') return stopCmd(cwd, flags._[0]);
@@ -131,6 +134,17 @@ export async function main(argv = process.argv.slice(2)) {
 
   process.stderr.write(USAGE);
   return cmd ? 2 : 0;
+}
+
+function initCmd(cwd) {
+  const path = resolve(cwd, 'agentflow.json');
+  if (existsSync(path)) {
+    process.stdout.write('agentflow.json already exists; left unchanged\n');
+    return 0;
+  }
+  writeFileSync(path, JSON.stringify({ harness: 'devin', concurrency: 8 }, null, 2) + '\n');
+  process.stdout.write(`created ${path}\n`);
+  return 0;
 }
 
 // --detach: respawn this CLI as a detached child with a parent-generated

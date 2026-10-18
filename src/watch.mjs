@@ -20,8 +20,13 @@ export function readJournal(path) {
 }
 
 export function foldState(records) {
+  // A resume appends a new epoch to the same durable journal. The interactive
+  // view renders only that epoch; Journal.load still retains earlier settled
+  // calls so runtime replay remains unchanged.
+  const start = (records ?? []).map((rec) => rec.type).lastIndexOf('run-start');
+  const epoch = start === -1 ? (records ?? []) : records.slice(start);
   const state = { meta: null, lanes: new Map(), batches: new Map(), done: null };
-  for (const rec of records ?? []) {
+  for (const rec of epoch) {
     if (rec.type === 'run-start') state.meta = rec;
     else if (rec.type === 'in-flight') {
       state.lanes.set(rec.i, { i: rec.i, label: rec.label, model: rec.model, batch: rec.batch ?? null, state: 'in-flight', at: rec.at });

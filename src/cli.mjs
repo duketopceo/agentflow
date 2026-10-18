@@ -96,6 +96,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   if (cmd === 'init') return initCmd(cwd);
 
+  if (cmd === 'status' && flags.watch) return watchCmd(cwd, flags._[0]);
   if (cmd === 'status') return statusCmd(cwd, flags._[0], false);
   if (cmd === 'tail') return statusCmd(cwd, flags._[0], true);
   if (cmd === 'stop') return stopCmd(cwd, flags._[0]);

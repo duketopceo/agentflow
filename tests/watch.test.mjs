@@ -46,6 +46,19 @@ test('foldState: batch records + latest poll; run-end abandons open lanes', () =
   assert.equal(s.done.reason, 'interrupted');
 });
 
+test('foldState: a resumed epoch does not retain an earlier terminal state', () => {
+  const s = foldState(recs([
+    { type: 'run-start', runId: 'r1', at: '2026-10-11T00:00:00Z' },
+    { type: 'agent', i: 0, label: 'old', ok: true, result: { text: 'x' } },
+    { type: 'run-end', reason: 'ok' },
+    { type: 'run-start', runId: 'r1', at: '2026-10-11T00:01:00Z' },
+    { type: 'in-flight', i: 1, label: 'new', at: '2026-10-11T00:01:01Z' },
+  ]));
+  assert.equal(s.done, null);
+  assert.equal(s.lanes.size, 1);
+  assert.equal(s.lanes.get(1).state, 'in-flight');
+});
+
 test('renderFrame: deterministic layout for a fixed state + now + tick', () => {
   const s = foldState(recs([
     { type: 'run-start', runId: 'r1', script: 'w.mjs', harness: 'echo', at: '2026-10-11T00:00:00.000Z', pid: 42 },

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { extractJson, classifyFailure, probeBinary, spawnProcess, applyVia } from '../src/adapters/base.mjs';
 import devin from '../src/adapters/devin.mjs';
 import claude from '../src/adapters/claude.mjs';
-import codex from '../src/adapters/codex.mjs';
+import codex, { extractUsage } from '../src/adapters/codex.mjs';
 import opencode from '../src/adapters/opencode.mjs';
 import ori from '../src/adapters/ori.mjs';
 import openrouter from '../src/adapters/openrouter.mjs';
@@ -70,9 +70,19 @@ test('codex buildArgv: exec, sandbox, schema file, worktree', () => {
   assert.ok(argv.includes('--output-schema') && argv.includes('/tmp/s.json'));
   assert.ok(argv.includes('-o') && argv.includes('/tmp/m.txt'));
   assert.ok(argv.includes('--worktree'));
+  assert.ok(argv.includes('--json'));
   assert.equal(argv.at(-1), 'review this file');
   const esc = codex.buildArgv(spec({ permission: 'escalated' }), {});
   assert.ok(esc.includes('--dangerously-bypass-approvals-and-sandbox'));
+});
+
+test('codex usage: normalizes the final JSONL usage event without estimating', () => {
+  const stream = [
+    JSON.stringify({ type: 'token_usage_record', payload: { usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 7, reasoning_output_tokens: 3, total_tokens: 110 } } }),
+    JSON.stringify({ type: 'token_usage_record', payload: { usage: { input_tokens: 180, cached_input_tokens: 90, output_tokens: 11, reasoning_output_tokens: 5, total_tokens: 196 } } }),
+  ].join('\n');
+  assert.deepEqual(extractUsage(stream), { promptTokens: 180, cachedTokens: 90, completionTokens: 16, inputTokens: 180, outputTokens: 11, reasoningTokens: 5, totalTokens: 196 });
+  assert.equal(extractUsage('{"type":"message"}'), null);
 });
 
 test('opencode buildArgv + parse json event stream', () => {

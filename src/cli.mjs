@@ -138,11 +138,15 @@ export async function main(argv = process.argv.slice(2)) {
 
 function initCmd(cwd) {
   const path = resolve(cwd, 'agentflow.json');
-  if (existsSync(path)) {
-    process.stdout.write('agentflow.json already exists; left unchanged\n');
-    return 0;
+  try {
+    writeFileSync(path, JSON.stringify({ harness: 'devin', concurrency: 8 }, null, 2) + '\n', { flag: 'wx' });
+  } catch (e) {
+    if (e && e.code === 'EEXIST') {
+      process.stdout.write('agentflow.json already exists; left unchanged\n');
+      return 0;
+    }
+    throw e;
   }
-  writeFileSync(path, JSON.stringify({ harness: 'devin', concurrency: 8 }, null, 2) + '\n');
   process.stdout.write(`created ${path}\n`);
   return 0;
 }

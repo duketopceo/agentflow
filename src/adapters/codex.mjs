@@ -30,6 +30,9 @@ export default {
     if (spec.worktree) argv.push('--worktree');
     if (spec.schema && ctx.schemaFile) argv.push('--output-schema', ctx.schemaFile);
     if (ctx.lastMsgFile) argv.push('-o', ctx.lastMsgFile);
+    // JSONL is the stable machine interface for usage; the last-message file
+    // remains the user-facing result channel.
+    argv.push('--json');
     argv.push('--skip-git-repo-check', spec.prompt);
     return argv;
   },
@@ -52,7 +55,8 @@ export default {
         if (!text) return { ok: false, error: { message: 'empty result', stderrTail: r.stderr, code: 0, timedOut: false, permissionDenied: false } };
         const json = spec.schema ? extractJson(text) : null;
         if (spec.schema && json == null) return { ok: false, error: { message: 'schema: could not parse required JSON from output', stderrTail: r.stderr, code: 0, timedOut: false, permissionDenied: false } };
-        return { ok: true, result: { text, json } };
+        const usage = extractUsage(r.stdout);
+        return { ok: true, result: { text, json, ...(usage ? { usage } : {}) } };
       }
       return { ok: false, error: classifyFailure(r, this.permissionDeniedPatterns) };
     } finally {
@@ -71,4 +75,29 @@ export default {
 
 function readText(p) {
   try { const t = readFileSync(p, 'utf8').trim(); return t || null; } catch { return null; }
+}
+
+// Codex emits usage as JSONL. Select the last cumulative event so streaming
+// updates do not get double-counted. Unknown event shapes intentionally yield
+// no usage rather than an estimate.
+export function extractUsage(stdout) {
+  let latest = null;
+  for (const line of String(stdout ?? '').split('\n')) {
+    try {
+      const event = JSON.parse(line);
+      const raw = event?.payload?.usage ?? event?.usage;
+      if (raw && Number.isFinite(raw.input_tokens) && Number.isFinite(raw.output_tokens)) latest = raw;
+    } catch {}
+  }
+  if (!latest) return null;
+  const reasoningTokens = latest.reasoning_output_tokens ?? 0;
+  return {
+    promptTokens: latest.input_tokens,
+    cachedTokens: latest.cached_input_tokens ?? 0,
+    completionTokens: latest.output_tokens + reasoningTokens,
+    inputTokens: latest.input_tokens,
+    outputTokens: latest.output_tokens,
+    reasoningTokens,
+    totalTokens: latest.total_tokens ?? latest.input_tokens + latest.output_tokens,
+  };
 }

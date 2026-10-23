@@ -235,7 +235,7 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
   const tot = lanes.reduce((a, l) => (l.usage
     ? { p: a.p + (l.usage.promptTokens ?? 0), c: a.c + (l.usage.completionTokens ?? 0), k: a.k + (l.usage.cachedTokens ?? 0), usd: a.usd + (l.usage.costUsd ?? 0), usdSeen: a.usdSeen || l.usage.costUsd != null, n: a.n + 1 }
     : a), { p: 0, c: 0, k: 0, usd: 0, usdSeen: false, n: 0 });
-  const tokTotal = tot.n ? ` · ${P(COL.muted, `tokens ${fmtTok(tot.p)}/${fmtTok(tot.c)}${tot.k ? ` (+${fmtTok(tot.k)} cached)` : ''}`)}` : '';
+  const tokTotal = (tot.p || tot.c || tot.k) ? ` · ${P(COL.muted, `tokens ${fmtTok(tot.p)}/${fmtTok(tot.c)}${tot.k ? ` (+${fmtTok(tot.k)} cached)` : ''}`)}` : '';
   const runTag = meta.runId ? ` · ${P(COL.muted, `run ${meta.runId}`)}` : '';
 
   if (state.done) {

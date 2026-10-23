@@ -423,10 +423,23 @@ export async function runScript(opts) {
   const log = (msg) => logLine(String(msg));
 
   let signalPromise = null;
+  let forced = false;
+  let firstExitCode = 130;
   function onSignal(sig) {
-    if (interrupted) return;
+    if (interrupted) {
+      // Second signal: the operator is done waiting out the grace window.
+      if (forced) return;
+      forced = true;
+      logLine(`${sig} again — aborting ${inFlight.size} in-flight agent(s) now`);
+      pool.drain();
+      abort.abort();
+      journal.append({ type: 'run-end', reason: 'interrupted', at: new Date().toISOString() });
+      logLine(`run ${runId} interrupted — resume with: agentflow run ${scriptName} --resume ${runId}`);
+      process.exit(firstExitCode);
+    }
     interrupted = true;
     const exitCode = sig === 'SIGINT' ? 130 : 143;
+    firstExitCode = exitCode;
     signalPromise = (async () => {
       logLine(`${sig} — draining ${pool.queue.length} queued, ${inFlight.size} in flight (grace ${graceMs}ms)`);
       pool.drain();
@@ -470,6 +483,13 @@ export async function runScript(opts) {
     err(`agentflow: ${scriptName} failed: ${e?.message ?? e}`);
     code = 1;
   } finally {
+    // Agent calls the script never awaited (or abandoned by a throw) must not
+    // outlive the run: kill their processes and stop queued ones from starting.
+    if (!interrupted && (inFlight.size || pool.queue.length)) {
+      logLine(`aborting ${inFlight.size} unawaited agent call(s) left running at script end`);
+      pool.drain();
+      abort.abort();
+    }
     process.off('SIGINT', sigint);
     process.off('SIGTERM', sigterm);
   }

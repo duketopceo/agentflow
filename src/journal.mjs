@@ -1,10 +1,25 @@
-import { appendFileSync, mkdirSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, existsSync, openSync, readSync, fstatSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 // JSONL run journal at .agentflow/runs/<run-id>.jsonl.
 // Line 1: run-start. Each settled agent() call: one 'agent' record.
 // Last line on exit: run-end. Resume replays settled records by call index.
+// A crash mid-append can leave a final line with no newline. Appending a new
+// record straight after it would glue the two into one unparsable line and
+// silently lose the new record (e.g. the resumed run-start). Terminate it.
+function terminateTornLine(path) {
+  let fd;
+  try { fd = openSync(path, 'r'); } catch { return; }
+  try {
+    const { size } = fstatSync(fd);
+    if (!size) return;
+    const b = Buffer.alloc(1);
+    readSync(fd, b, 0, 1, size - 1);
+    if (b[0] !== 0x0a) appendFileSync(path, '\n');
+  } finally { closeSync(fd); }
+}
+
 export class Journal {
   static dirFor(cwd) {
     return join(cwd, '.agentflow', 'runs');
@@ -18,6 +33,7 @@ export class Journal {
     const dir = Journal.dirFor(cwd);
     mkdirSync(dir, { recursive: true });
     const j = new Journal(join(dir, `${meta.runId}.jsonl`));
+    terminateTornLine(j.path);
     j.append({ type: 'run-start', ...meta, at: new Date().toISOString() });
     return j;
   }
@@ -37,6 +53,7 @@ export class Journal {
       if (!line.trim()) continue;
       let rec;
       try { rec = JSON.parse(line); } catch { continue; }
+      if (rec === null || typeof rec !== 'object') continue;
       if (rec.type === 'run-start') { meta.runStart = rec; meta.ended = null; } // resume epoch: a new run-start supersedes any earlier run-end
       else if (rec.type === 'agent') {
         meta.settled.set(rec.i, rec);

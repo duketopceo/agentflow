@@ -25,6 +25,9 @@ export function spawnProcess(argv, { cwd, timeout, signal, env } = {}) {
       if (signal.aborted) { child.kill('SIGKILL'); }
       else signal.addEventListener('abort', onAbort, { once: true });
     }
+    // Decode via StringDecoder: raw Buffer chunks can split a multi-byte char.
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; if (stderr.length > STDERR_TAIL * 4) stderr = stderr.slice(-STDERR_TAIL * 4); });
     child.on('error', (e) => { clearTimeout(timer); finish({ spawnError: e.message, stderr }); });
@@ -43,19 +46,27 @@ export function extractJson(text) {
   try { return JSON.parse(t); } catch {}
   const fenced = /```(?:json)?\s*\n([\s\S]*?)```/.exec(t);
   if (fenced) { try { return JSON.parse(fenced[1].trim()); } catch {} }
-  const start = t.indexOf('{');
-  if (start === -1) return null;
-  let depth = 0, inStr = null;
-  for (let i = start; i < t.length; i++) {
-    const c = t[i];
-    if (inStr) { if (c === '\\') i++; else if (c === inStr) inStr = null; }
-    else if (c === '"') inStr = c;
-    else if (c === '{') depth++;
-    else if (c === '}' && --depth === 0) {
-      try { return JSON.parse(t.slice(start, i + 1)); } catch { return null; }
-    }
+  // Try each '{' in turn: prose before the real object may contain stray
+  // braces ("use {x} like so: {...}"). Bounded so brace-heavy junk stays cheap.
+  let start = t.indexOf('{');
+  for (let tries = 0; start !== -1 && tries < 64; tries++, start = t.indexOf('{', start + 1)) {
+    const end = balancedEnd(t, start);
+    if (end === -1) continue;
+    try { return JSON.parse(t.slice(start, end + 1)); } catch {}
   }
   return null;
+}
+
+function balancedEnd(t, start) {
+  let depth = 0, inStr = false;
+  for (let i = start; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) { if (c === '\\') i++; else if (c === '"') inStr = false; }
+    else if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) return i;
+  }
+  return -1;
 }
 
 // Prompt-level schema enforcement for adapters without a native flag.

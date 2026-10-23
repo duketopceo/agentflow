@@ -29,6 +29,10 @@ usage:
 config: agentflow.json in cwd — {"harness": "devin", "concurrency": 8, "via": "ori"}
 `;
 
+// Flags that never take a value — otherwise `run --strict script.mjs` would
+// swallow the script path as the flag's value.
+const BOOLEAN_FLAGS = new Set(['cache', 'strict', 'detach', 'all', 'watch']);
+
 function parseFlags(argv) {
   const flags = { _: [] };
   let i = 0;
@@ -38,7 +42,8 @@ function parseFlags(argv) {
     if (a.startsWith('--')) {
       const k = a.slice(2);
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith('--')) { flags[k] = next; i += 2; }
+      if (BOOLEAN_FLAGS.has(k)) { flags[k] = true; i += 1; }
+      else if (next !== undefined && !next.startsWith('--')) { flags[k] = next; i += 2; }
       else { flags[k] = true; i += 1; }
     } else if (a === '-c') { flags.concurrency = argv[++i]; i += 1; }
     else flags._.push(a), i += 1;
@@ -71,24 +76,37 @@ export async function main(argv = process.argv.slice(2)) {
       process.stderr.write(`agentflow: unknown harness '${harnessName}' (have: ${Object.keys(adapters).join(', ')})\n`);
       return 2;
     }
+    // Reject garbage numerics up front instead of silently running with a
+    // default (`--concurrency abc` used to mean 8).
+    const num = {};
+    for (const [key, flag, min] of [['concurrency', 'concurrency', 1], ['maxAgents', 'max-agents', 1], ['retries', 'retries', 0], ['batchPollMs', 'batch-poll', 1], ['batchTimeoutMs', 'batch-timeout', 1], ['graceMs', 'grace', 0]]) {
+      const raw = flags[flag] ?? config[key];
+      if (raw === undefined || raw === null) continue;
+      const n = Number(raw);
+      if (raw === true || !Number.isFinite(n) || n < min) {
+        process.stderr.write(`agentflow: --${flag} must be a number >= ${min} (got '${raw === true ? '' : raw}')\n`);
+        return 2;
+      }
+      num[key] = n;
+    }
     if (flags.detach) return detachRun(cwd, argv);
 
     const { code, runId } = await runScript({
       scriptPath: resolve(cwd, script),
       adapter,
       runId: flags['run-id'] ?? undefined,
-      concurrency: Number(flags.concurrency ?? config.concurrency) || 8,
+      concurrency: num.concurrency ?? 8,
       cwd,
       args: flags.scriptArgs ?? [],
       via: flags.via ?? config.via ?? null,
       cache: !!(flags.cache || config.cache),
       strict: !!(flags.strict || config.strict),
-      maxAgents: Number(flags['max-agents'] ?? config.maxAgents) || 1000,
-      retries: Number(flags.retries ?? config.retries) || 0,
-      batchPollMs: Number(flags['batch-poll'] ?? config.batchPollMs) || undefined,
-      batchTimeoutMs: Number(flags['batch-timeout'] ?? config.batchTimeoutMs) || undefined,
+      maxAgents: num.maxAgents ?? 1000,
+      retries: num.retries ?? 0,
+      batchPollMs: num.batchPollMs,
+      batchTimeoutMs: num.batchTimeoutMs,
       resumeId: flags.resume ?? null,
-      graceMs: flags.grace ? Number(flags.grace) : undefined,
+      graceMs: num.graceMs,
     });
     if (runId) process.stderr.write(`[agentflow] run ${runId}\n`);
     return code;

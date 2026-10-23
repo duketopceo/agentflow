@@ -38,19 +38,31 @@ export default {
     return run(this, withSchemaPrompt(spec));
   },
 
-  // --format json emits one JSON event per line; collect text parts in order.
+  // --format json emits one JSON event per line; collect text parts in order
+  // and sum step_finish token/cost counters into result.usage for watch/status.
   parse(r, spec) {
     const texts = [];
+    let pTok = 0, cTok = 0, cached = 0, cost = 0, steps = 0;
     for (const line of (r.stdout ?? '').split('\n')) {
       if (!line.trim()) continue;
       let ev;
       try { ev = JSON.parse(line); } catch { continue; }
       const t = eventText(ev);
       if (typeof t === 'string' && t) texts.push(t);
+      const tok = ev?.part?.tokens ?? ev?.tokens;
+      if (tok && (ev?.type === 'step_finish' || ev?.part?.type === 'step-finish')) {
+        pTok += tok.input ?? 0;
+        cTok += tok.output ?? 0;
+        cached += tok.cache?.read ?? 0;
+        cost += ev?.part?.cost ?? ev?.cost ?? 0;
+        steps++;
+      }
     }
     const text = texts.join('') || (r.stdout ?? '').trim();
     if (!text) return null;
-    return { text, json: spec.schema ? extractJson(text) : null };
+    const out = { text, json: spec.schema ? extractJson(text) : null };
+    if (steps > 0) out.usage = { promptTokens: pTok, completionTokens: cTok, cachedTokens: cached, costUsd: cost, steps };
+    return out;
   },
 
   probe() { return probeBinary(this); },

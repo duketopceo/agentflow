@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runScript } from '../src/runtime.mjs';
+import { runScript, fpOf } from '../src/runtime.mjs';
 import { Journal } from '../src/journal.mjs';
 import echo, { calls } from '../src/adapters/echo.mjs';
 import { spawnAgent } from '../src/adapters/base.mjs';
@@ -171,6 +171,83 @@ log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
     assert.equal(r[0], 'CACHED-0'); // replayed, not respawned
     assert.equal(calls.length, 2); // only i=1,2 executed
     assert.match(r[1], /echo\[a1\]/);
+  } finally { f.cleanup(); }
+});
+
+test('resume guard: unchanged script replays by fingerprint — zero calls', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const a = await agent('do 0', {label:'a0'});
+const b = await agent('do 1', {label:'a1'});
+log('RESULT:' + JSON.stringify([a.text, b.text]));`);
+    const r1 = await f.run();
+    assert.equal(r1.code, 0);
+    // Journal records carry real fps now — an identical script replays fully.
+    const res = await f.run({ resumeId: r1.runId });
+    assert.equal(res.code, 0);
+    assert.equal(calls.length, 0);
+    assert.match(f.lastResult()[0], /echo\[a0\]: do 0/);
+  } finally { f.cleanup(); }
+});
+
+test('resume guard: a changed prompt re-executes that call only', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const a = await agent('do 0', {label:'a0'});
+const b = await agent('do 1', {label:'a1'});
+log('RESULT:' + JSON.stringify([a.text, b.text]));`);
+    const r1 = await f.run();
+    assert.equal(r1.code, 0);
+    f.writeScript(`const a = await agent('do 0', {label:'a0'});
+const b = await agent('EDITED 1', {label:'a1'});
+log('RESULT:' + JSON.stringify([a.text, b.text]));`);
+    const res = await f.run({ resumeId: r1.runId });
+    assert.equal(res.code, 0);
+    assert.equal(calls.length, 1); // only the changed call ran
+    const r = f.lastResult();
+    assert.match(r[0], /echo\[a0\]: do 0/);       // replayed
+    assert.match(r[1], /echo\[a1\]: EDITED 1/);   // fresh result, not stale
+    assert.ok(f.lines.some((l) => l.includes('replay miss [1]')));
+    // The stale record is overwritten — a second resume replays the new one.
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.match(loaded.settled.get(1).result.text, /EDITED 1/);
+    assert.ok(loaded.settled.get(1).fp);
+  } finally { f.cleanup(); }
+});
+
+test('resume guard: label-only or timeout-only edits still replay', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const a = await agent('do 0', {label:'a0', timeout: 1000});
+log('RESULT:' + JSON.stringify(a.text));`);
+    const r1 = await f.run();
+    assert.equal(r1.code, 0);
+    // label/timeout are display + execution policy — not fp inputs.
+    f.writeScript(`const a = await agent('do 0', {label:'renamed', timeout: 9999});
+log('RESULT:' + JSON.stringify(a.text));`);
+    const res = await f.run({ resumeId: r1.runId });
+    assert.equal(res.code, 0);
+    assert.equal(calls.length, 0);
+    assert.match(f.lastResult(), /echo\[a0\]: do 0/);
+  } finally { f.cleanup(); }
+});
+
+test('resume under a different harness re-executes and warns', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const a = await agent('do 0', {label:'a0'});
+log('RESULT:' + JSON.stringify(a.text));`);
+    // Seed a journal as a 'devin' run: the settled record's fp was computed
+    // under that harness, so an echo resume cannot replay it.
+    const prior = Journal.create(f.dir, { runId: 'run-xh', script: 'w.mjs', harness: 'devin' });
+    prior.append({ type: 'agent', i: 0, label: 'a0', ok: true, result: { text: 'DEVIN-RESULT', json: null }, fp: fpOf('devin', { prompt: 'do 0' }) });
+    prior.append({ type: 'run-end', reason: 'interrupted' });
+    const res = await runScript({ scriptPath: join(f.dir, 'w.mjs'), adapter: echo, cwd: f.dir, resumeId: 'run-xh', err: (s) => f.lines.push(s) });
+    assert.equal(res.code, 0);
+    assert.equal(calls.length, 1); // fp includes harness — nothing replays
+    assert.match(f.lastResult(), /echo\[a0\]: do 0/);
+    assert.ok(f.lines.some((l) => l.includes("journal is a 'devin' run")));
+    assert.ok(f.lines.some((l) => l.includes('replay miss [0]')));
   } finally { f.cleanup(); }
 });
 

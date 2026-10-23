@@ -9,6 +9,19 @@ import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
 
 const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries', 'fetchImpl']);
 const DEFAULT_GRACE_MS = 8000;
+
+// Replay fingerprint — sha over the spec fields that determine what a call
+// returns. label/timeout/retries/fetchImpl are display or execution policy:
+// changing them must NOT invalidate journaled results. On --resume a settled
+// record replays only when its fp matches the call's (legacy records with no
+// fp replay unconditionally, preserving pre-fp journals); a mismatch
+// re-executes and overwrites, so a stale result can never surface.
+export const fpOf = (harness, spec) => createHash('sha256').update(JSON.stringify({
+  h: harness, p: spec.prompt, m: spec.model ?? null, s: spec.schema ?? null,
+  w: spec.worktree ?? null, c: spec.cwd ?? null, pm: spec.permission ?? null,
+  v: spec.via ?? null, re: spec.reasoningEffort ?? null,
+})).digest('hex').slice(0, 16);
+const replayable = (rec, fp) => rec != null && (rec.fp == null || rec.fp === fp);
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
 // Determinism lint — mirror of Claude's inline-Workflow contract. A
@@ -146,6 +159,11 @@ export async function runScript(opts) {
     err(`agentflow: no journal for run '${resumeId}' under ${journalDir}`);
     return { code: 1 };
   }
+  // Harness is a fingerprint input — a run resumed under a different harness
+  // re-executes every call. Say so once, up front, instead of N replay misses.
+  if (prior?.runStart?.harness && prior.runStart.harness !== adapter.name) {
+    err(`agentflow: journal is a '${prior.runStart.harness}' run — all calls re-execute under '${adapter.name}'`);
+  }
   // run-start carries the workflow's display identity (name, declared phases)
   // so watch/status can title and group the run without re-parsing the script.
   const journal = Journal.create(cwd, {
@@ -183,12 +201,14 @@ export async function runScript(opts) {
       else logLine(`warning: unknown agent() option '${k}' ignored`);
     }
     if (via && !spec.via) spec.via = via;
+    const fp = fpOf(adapter.name, spec);
 
-    if (prior?.settled.has(i)) {
-      const rec = prior.settled.get(i);
+    const rec = prior?.settled.get(i);
+    if (replayable(rec, fp)) {
       logLine(`replay ${spec.label} -> ${rec.ok ? 'ok' : 'null'}`);
       return rec.ok ? rec.result : null;
     }
+    if (rec != null) logLine(`replay miss [${i}] ${spec.label} — call changed since run, re-executing`);
 
     const cKey = cache ? cacheKey(adapter.name, { ...spec, cwd: spec.cwd ?? cwd }) : null;
     if (cKey) {
@@ -243,16 +263,16 @@ export async function runScript(opts) {
         if (abort.signal.aborted && !s?.ok) return { cancelled: true };
         const secs = ((Date.now() - started) / 1000).toFixed(1);
         if (s.ok) {
-          journal.append({ type: 'agent', i, label: spec.label, ok: true, result: s.result, model: spec.model ?? null, elapsed: secs, at: new Date().toISOString() });
+          journal.append({ type: 'agent', i, label: spec.label, ok: true, result: s.result, model: spec.model ?? null, fp, elapsed: secs, at: new Date().toISOString() });
           if (cKey) cacheWrite(cwd, cKey, s.result);
           return { ok: true, result: s.result, elapsed: secs };
         }
-        journal.append({ type: 'agent', i, label: spec.label, ok: false, error: s.error, model: spec.model ?? null, elapsed: secs, at: new Date().toISOString() });
+        journal.append({ type: 'agent', i, label: spec.label, ok: false, error: s.error, model: spec.model ?? null, fp, elapsed: secs, at: new Date().toISOString() });
         return { ok: false, error: s.error, elapsed: secs };
       } catch (e) {
         const secs = ((Date.now() - started) / 1000).toFixed(1);
         const error = { message: String(e?.message ?? e), permissionDenied: false };
-        journal.append({ type: 'agent', i, label: spec.label, ok: false, error, model: spec.model ?? null, elapsed: secs, at: new Date().toISOString() });
+        journal.append({ type: 'agent', i, label: spec.label, ok: false, error, model: spec.model ?? null, fp, elapsed: secs, at: new Date().toISOString() });
         return { ok: false, error, elapsed: secs };
       } finally {
         inFlight.delete(spec);
@@ -303,35 +323,45 @@ export async function runScript(opts) {
       throw new Error(`batch() is single-model per call (OR batches carry one model) — got: ${seen.join(', ')}`);
     }
     for (const { spec } of specs) spec.model = model;
+    for (const s of specs) s.fp = fpOf(adapter.name, s.spec); // fp after model normalization — model is an fp input
 
-    // Full replay: every index already settled — zero requests.
-    if (prior && specs.every(({ i }) => prior.settled.has(i))) {
+    const isSettled = ({ i, fp }) => replayable(prior?.settled.get(i), fp);
+    const fresh = specs.filter((s) => !isSettled(s));
+
+    // Full replay: every item settled with a matching fingerprint — zero requests.
+    if (prior && !fresh.length) {
       logLine(`replay batch[${firstI}..${firstI + specs.length - 1}]`);
       return specs.map(({ i }) => { const rec = prior.settled.get(i); return rec.ok ? rec.result : null; });
     }
 
     const label = `batch[${specs.length}]`;
-    const bodies = specs.map(({ spec }) => adapter.batchBody(spec));
+    // Partial divergence resubmits only changed/new items — batch exists to
+    // save spend; re-billing unchanged items on resume would defeat it.
+    const bodies = fresh.map(({ spec }) => adapter.batchBody(spec));
     // batchBody carries buildBody's default model when none was given.
     const batchModel = model ?? bodies[0].model;
     const hash = createHash('sha256').update(JSON.stringify({ model: batchModel, bodies })).digest('hex').slice(0, 16);
     const io = { signal: abort.signal, fetchImpl: batchOpts.fetchImpl ?? fetchImpl };
     const started = Date.now();
     const secs = () => ((Date.now() - started) / 1000).toFixed(1);
-    // Journals one agent record per item at its own index; indices settled by
-    // a prior partial collect are left untouched. Cancelled tasks journal
-    // nothing — the pending batch record is what resume re-polls.
+    const freshIdx = fresh.map(({ i }) => i);
+    const freshPos = new Map(fresh.map(({ i }, j) => [i, j]));
+    const freshContiguous = freshIdx.every((v, j) => v === freshIdx[0] + j);
+    // Journals one agent record per FRESH item at its own index; an item whose
+    // settled record's fp still matches replays and is never re-journaled.
+    // Cancelled tasks journal nothing — the pending batch record is what
+    // resume re-polls.
     const settleAll = (perItem) => {
       const elapsed = secs();
-      return specs.map(({ spec, i }, k) => {
-        const s = perItem(spec, i, k);
-        if (!prior?.settled.has(i)) {
-          journal.append({
-            type: 'agent', i, label: spec.label, ok: s.ok,
-            ...(s.ok ? { result: s.result } : { error: s.error }),
-            model: spec.model ?? null, elapsed, at: new Date().toISOString(),
-          });
-        }
+      return specs.map(({ spec, i, fp }) => {
+        const rec = prior?.settled.get(i);
+        if (replayable(rec, fp)) return rec.ok ? { ok: true, result: rec.result } : { ok: false, error: rec.error };
+        const s = perItem(spec, i, freshPos.get(i));
+        journal.append({
+          type: 'agent', i, label: spec.label, ok: s.ok,
+          ...(s.ok ? { result: s.result } : { error: s.error }),
+          model: spec.model ?? null, fp, elapsed, at: new Date().toISOString(),
+        });
         return s;
       });
     };
@@ -339,13 +369,20 @@ export async function runScript(opts) {
       if (abort.signal.aborted) return { cancelled: true };
       inFlight.add(label);
       try {
-        const prev = prior?.batches?.find((b) => b.firstI === firstI && b.count === specs.length);
+        // A journaled batch re-polls when it covers exactly the fresh items.
+        // New records carry `items` (possibly non-contiguous); legacy records
+        // only had firstI+count, which always meant a contiguous range.
+        const covers = (b) => (Array.isArray(b.items)
+          ? b.items.length === freshIdx.length && b.items.every((v, j) => v === freshIdx[j])
+          : freshContiguous && b.firstI === freshIdx[0] && b.count === freshIdx.length);
+        const priorBatch = prior?.batches?.find(covers);
         let batchId = null;
-        if (prev?.hash === hash) {
-          batchId = prev.batch_id;
+        if (priorBatch?.hash === hash) {
+          batchId = priorBatch.batch_id;
           logLine(`${label} re-polling journaled batch ${batchId}`);
         } else {
-          if (prev) logLine(`${label} spec changed since ${prev.batch_id} — submitting fresh`);
+          if (priorBatch) logLine(`${label} spec changed since ${priorBatch.batch_id} — submitting fresh`);
+          else if (fresh.length !== specs.length) logLine(`${label} ${specs.length - fresh.length} unchanged (replayed), ${fresh.length} to submit`);
           const sub = await adapter.submitBatch(batchModel, bodies, io);
           // Aborted mid-submit: the POST may or may not have landed on OR's
           // side, but no batch_id was journaled — leave indices unsettled so
@@ -355,15 +392,13 @@ export async function runScript(opts) {
             return { items: settleAll(() => ({ ok: false, error: sub.error })) };
           }
           batchId = sub.batchId;
-          journal.append({ type: 'batch', batch_id: batchId, firstI, count: specs.length, model: batchModel, hash, at: new Date().toISOString() });
+          journal.append({ type: 'batch', batch_id: batchId, firstI: freshIdx[0], count: fresh.length, items: freshIdx, model: batchModel, hash, at: new Date().toISOString() });
         }
-        // Every item index is now pending on the batch — watch/status show
-        // them in-flight until their own agent records land. Skip indices a
-        // prior partial run already settled.
-        for (const { spec, i } of specs) {
-          if (!prior?.settled.has(i)) {
-            journal.append({ type: 'in-flight', i, label: spec.label, model: spec.model ?? batchModel, batch: batchId, at: new Date().toISOString() });
-          }
+        // Every FRESH item index is now pending on the batch — watch/status
+        // show them in-flight until their own agent records land. Replayed
+        // items are already settled and stay untouched.
+        for (const { spec, i } of fresh) {
+          journal.append({ type: 'in-flight', i, label: spec.label, model: spec.model ?? batchModel, batch: batchId, at: new Date().toISOString() });
         }
         const timeoutMs = batchOpts.batchTimeoutMs ?? batchTimeoutMs;
         const deadline = Date.now() + timeoutMs;

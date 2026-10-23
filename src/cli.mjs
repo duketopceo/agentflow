@@ -13,7 +13,7 @@ usage:
   agentflow run <script.mjs> [--harness <name>] [--concurrency <n>]
                 [--via ori] [--cache] [--strict] [--max-agents <n>]
                 [--retries <n>] [--resume <run-id>] [--grace <ms>]
-                [--cwd <dir>] [--detach] [--tmux]
+                [--cwd <dir>] [--detach] [--tmux] [--args-json <json>]
                 [-- <script args>...]
   agentflow status <run-id>        progress + outcome from the journal
   agentflow tail <run-id>          stream journal events until run-end
@@ -91,13 +91,25 @@ export async function main(argv = process.argv.slice(2)) {
     }
     if (flags.detach) return detachRun(cwd, argv);
 
-    const { code, runId } = await runScript({
+    // --args-json hands the script structured args (Claude parity); the raw
+    // `--` tail stays the string-array path. They are mutually exclusive.
+    let args = flags.scriptArgs ?? [];
+    if (flags['args-json'] !== undefined) {
+      if (flags.scriptArgs?.length) {
+        process.stderr.write('agentflow: --args-json and trailing -- args are mutually exclusive\n');
+        return 2;
+      }
+      try { args = JSON.parse(flags['args-json']); }
+      catch { process.stderr.write(`agentflow: --args-json is not valid JSON\n`); return 2; }
+    }
+
+    const { code, runId, result } = await runScript({
       scriptPath: resolve(cwd, script),
       adapter,
       runId: flags['run-id'] ?? undefined,
       concurrency: num.concurrency ?? 8,
       cwd,
-      args: flags.scriptArgs ?? [],
+      args,
       via: flags.via ?? config.via ?? null,
       cache: !!(flags.cache || config.cache),
       strict: !!(flags.strict || config.strict),
@@ -109,6 +121,9 @@ export async function main(argv = process.argv.slice(2)) {
       graceMs: num.graceMs,
     });
     if (runId) process.stderr.write(`[agentflow] run ${runId}\n`);
+    // A script's `return <value>` is the workflow's output — stdout carries it
+    // (progress stays on stderr), so `agentflow run x.mjs > out.json` works.
+    if (result !== undefined) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     return code;
   }
 
@@ -247,7 +262,10 @@ async function statusCmd(cwd, runId, follow) {
     if (rec.type === 'run-start') process.stdout.write(`run started ${rec.script} harness=${rec.harness}\n`);
     else if (rec.type === 'phase') process.stdout.write(`▶ phase: ${rec.name}\n`);
     else if (rec.type === 'agent') process.stdout.write(`[${rec.i}] ${rec.label} -> ${rec.ok ? 'ok' : 'fail'}${rec.model ? ` (${rec.model})` : ''}\n`);
-    else if (rec.type === 'run-end') process.stdout.write(`run ended: ${rec.reason}\n`);
+    else if (rec.type === 'run-end') {
+      process.stdout.write(`run ended: ${rec.reason}\n`);
+      if (rec.result !== undefined) process.stdout.write(`result: ${JSON.stringify(rec.result).slice(0, 500)}\n`);
+    }
   };
   for (;;) {
     const meta = Journal.load(path);

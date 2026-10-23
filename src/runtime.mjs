@@ -473,6 +473,12 @@ export async function runScript(opts) {
   let signalPromise = null;
   let forced = false;
   let firstExitCode = 130;
+  // Scripts may call process.exit (Claude-parity scripts do); it must never
+  // take the runner down. During script evaluation it's replaced with a
+  // sentinel throw caught at the fn() boundary — the runtime's own exits
+  // (this signal path and the post-await signal join) hold realExit and
+  // bypass the shim.
+  const realExit = process.exit;
   function onSignal(sig) {
     if (interrupted) {
       // Second signal: the operator is done waiting out the grace window.
@@ -483,7 +489,7 @@ export async function runScript(opts) {
       abort.abort();
       journal.append({ type: 'run-end', reason: 'interrupted', at: new Date().toISOString() });
       logLine(`run ${runId} interrupted — resume with: agentflow run ${scriptName} --resume ${runId}`);
-      process.exit(firstExitCode);
+      realExit(firstExitCode);
     }
     interrupted = true;
     const exitCode = sig === 'SIGINT' ? 130 : 143;
@@ -502,9 +508,10 @@ export async function runScript(opts) {
       }
       journal.append({ type: 'run-end', reason: 'interrupted', at: new Date().toISOString() });
       logLine(`run ${runId} interrupted — resume with: agentflow run ${scriptName} --resume ${runId}`);
-      process.exit(exitCode);
+      realExit(exitCode);
     })();
   }
+  const SCRIPT_EXIT = Symbol('script-exit');
   const sigint = () => void onSignal('SIGINT');
   const sigterm = () => void onSignal('SIGTERM');
   process.on('SIGINT', sigint);
@@ -519,18 +526,33 @@ export async function runScript(opts) {
     return { code: 1, runId, journalPath };
   }
 
+  // JSON-round-trip a script's return value for the run-end record; anything
+  // non-serializable degrades to a repr instead of failing the journal write.
+  const jsonSafe = (v) => { try { return JSON.parse(JSON.stringify(v)); } catch { return { unserializable: true, repr: String(v).slice(0, 500) }; } };
+
   let code = 0;
+  let ret;
+  process.exit = (c = 0) => { throw { [SCRIPT_EXIT]: c }; };
   try {
-    await fn(agent, parallel, pipeline, phase, log, batch, args, meta);
+    ret = await fn(agent, parallel, pipeline, phase, log, batch, args, meta);
     // If a signal is mid-handling, wait for it: in-flight results must be
     // journaled and the exit code must be the signal code, not success.
-    if (signalPromise) process.exit(await signalPromise);
-    journal.append({ type: 'run-end', reason: 'ok', at: new Date().toISOString() });
+    if (signalPromise) realExit(await signalPromise);
+    journal.append({ type: 'run-end', reason: 'ok', ...(ret !== undefined ? { result: jsonSafe(ret) } : {}), at: new Date().toISOString() });
   } catch (e) {
-    journal.append({ type: 'run-end', reason: 'error', error: String(e?.stack ?? e), at: new Date().toISOString() });
-    err(`agentflow: ${scriptName} failed: ${e?.message ?? e}`);
-    code = 1;
+    const exitReq = e?.[SCRIPT_EXIT];
+    if (exitReq !== undefined) {
+      // process.exit(c) inside a script ends the script with code c.
+      code = Number.isInteger(exitReq) ? exitReq : 1;
+      journal.append({ type: 'run-end', reason: code === 0 ? 'ok' : 'error', at: new Date().toISOString() });
+      if (code !== 0) err(`agentflow: ${scriptName} exited ${code} (process.exit)`);
+    } else {
+      journal.append({ type: 'run-end', reason: 'error', error: String(e?.stack ?? e), at: new Date().toISOString() });
+      err(`agentflow: ${scriptName} failed: ${e?.message ?? e}`);
+      code = 1;
+    }
   } finally {
+    process.exit = realExit;
     // Agent calls the script never awaited (or abandoned by a throw) must not
     // outlive the run: kill their processes and stop queued ones from starting.
     if (!interrupted && (inFlight.size || pool.queue.length)) {
@@ -541,5 +563,5 @@ export async function runScript(opts) {
     process.off('SIGINT', sigint);
     process.off('SIGTERM', sigterm);
   }
-  return { code, runId, journalPath };
+  return { code, runId, journalPath, result: ret };
 }

@@ -55,8 +55,16 @@ changed since the run (logs `replay miss [i]` — stale results can't surface).
 | `batch` | `(items, opts?) => Promise<results>` | async fan-out on **openrouter** (one OR Batch job per N prompts, ~40–60% off, ≤24h window), **devin** (N cloud sessions — `devin_mode` model, `structured_output` collected; swe-2 models are free), **perplexity** (N `/v1/async/sonar` requests — async accepts **`sonar-deep-research` only**), **openai** (Batches API, ~50% off, 24h) or **anthropic** (Message Batches, ~50% off, 24h). Items: `{prompt, label?, model?, schema?, maxTokens?}`; all share ONE model (`opts.model` or per-item). opts: `batchPollMs` (15s), `batchTimeoutMs` (2h). Results align to input order; each item consumes a normal call index |
 | `phase` | `(name) => void` | labels stderr progress; journaled so `watch`/`tail` group lanes by phase |
 | `log` | `(msg) => void` | stderr; keep secrets out |
-| `args` | array | args after `--` on the CLI |
+| `args` | any | string array after `--` on the CLI, or parsed JSON via `--args-json` (e.g. `--args-json '{"task":"x","n":3}'` — Claude-parity structured args) |
 | `meta` | object | from `export const meta = {...}` |
+
+Script ends with `return <value>` → the value prints on **stdout** (progress
+stays stderr, so `agentflow run w.mjs > out.json` composes) and is journaled
+on `run-end`. `process.exit(code)` inside a script ends the *script* with
+that code — it can never kill the runner (Claude's sandbox parity).
+Claude-parity gap: `stallMs` (inactivity timeout per agent) isn't implemented —
+`timeout` is a hard wall-clock kill, the documented subset is `return` +
+`args` + `process.exit`.
 
 Constraints:
 

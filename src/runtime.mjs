@@ -146,7 +146,13 @@ export async function runScript(opts) {
     err(`agentflow: no journal for run '${resumeId}' under ${journalDir}`);
     return { code: 1 };
   }
-  const journal = Journal.create(cwd, { runId, script: scriptName, harness: adapter.name, resumed: !!resumeId, pid: process.pid, graceMs });
+  // run-start carries the workflow's display identity (name, declared phases)
+  // so watch/status can title and group the run without re-parsing the script.
+  const journal = Journal.create(cwd, {
+    runId, script: scriptName, harness: adapter.name, resumed: !!resumeId, pid: process.pid, graceMs,
+    name: typeof meta.name === 'string' ? meta.name : undefined,
+    phases: Array.isArray(meta.phases) ? meta.phases.filter((p) => typeof p === 'string') : undefined,
+  });
 
   const pool = new Pool(concurrency);
   const abort = new AbortController();
@@ -419,7 +425,14 @@ export async function runScript(opts) {
       return v;
     }));
 
-  const phase = (name) => { phaseName = name; logLine(`phase: ${name}`); };
+  // A phase is display metadata: the journal record groups lanes for
+  // watch/tail, replay never reads it. nextI marks the call index where the
+  // phase begins so groups can be ordered against un-phased lanes.
+  const phase = (name) => {
+    phaseName = name;
+    journal.append({ type: 'phase', name: String(name), nextI: callIndex, at: new Date().toISOString() });
+    logLine(`phase: ${name}`);
+  };
   const log = (msg) => logLine(String(msg));
 
   let signalPromise = null;

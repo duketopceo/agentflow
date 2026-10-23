@@ -71,6 +71,56 @@ test('--detach: parent returns run-id immediately; child completes and journals'
   }
 });
 
+test('--detach --tmux: spawns a tmux split-pane watch when $TMUX is set', async () => {
+  const f = fixture();
+  const argvFile = join(f.dir, 'tmux-argv.txt');
+  const fakebin = fileURLToPath(new URL('fakebin', import.meta.url));
+  try {
+    f.write('w.mjs', SCRIPT);
+    const r = await new Promise((resolve, reject) => {
+      const p = spawn(process.execPath, [BIN, 'run', 'w.mjs', '--harness', 'echo', '--detach', '--tmux'], {
+        cwd: f.dir,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, TMUX: '/tmp/fake-tmux-sock,1,0', FAKEBIN_ARGV_FILE: argvFile, PATH: `${fakebin}:${process.env.PATH}` },
+      });
+      let out = '', errOut = '';
+      p.stdout.on('data', (d) => (out += d));
+      p.stderr.on('data', (d) => (errOut += d));
+      const t = setTimeout(() => { p.kill('SIGKILL'); reject(new Error('cli timeout')); }, 15000);
+      p.on('close', (code) => { clearTimeout(t); resolve({ code, out, err: errOut }); });
+    });
+    assert.equal(r.code, 0);
+    const runId = r.out.match(/run (\S+) \(detached/)?.[1];
+    assert.ok(runId, `expected run id: ${r.out}`);
+
+    // The stub tmux recorded the split-window invocation: watch, this run-id,
+    // started in the run's cwd. The stub writes async — poll for the file.
+    let tmuxArgv = '';
+    for (let i = 0; i < 40 && !existsSync(argvFile); i++) await new Promise((res) => setTimeout(res, 100));
+    if (existsSync(argvFile)) tmuxArgv = readFileSync(argvFile, 'utf8');
+    assert.match(tmuxArgv, /split-window/);
+    assert.match(tmuxArgv, new RegExp(`-c ${f.dir.replace(/[/]/g, '\\/')}`));
+    assert.match(tmuxArgv, new RegExp(`watch ["']?${runId}`));
+
+    // Without $TMUX the flag warns and doesn't try to spawn. TMUX is stripped
+    // explicitly — the suite itself may be running inside a tmux session.
+    const plain = await new Promise((resolve, reject) => {
+      const env = { ...process.env };
+      delete env.TMUX;
+      const p = spawn(process.execPath, [BIN, 'run', 'w.mjs', '--harness', 'echo', '--detach', '--tmux'], { cwd: f.dir, stdio: ['ignore', 'pipe', 'pipe'], env });
+      let out = '', errOut = '';
+      p.stdout.on('data', (d) => (out += d));
+      p.stderr.on('data', (d) => (errOut += d));
+      const t = setTimeout(() => { p.kill('SIGKILL'); reject(new Error('cli timeout')); }, 15000);
+      p.on('close', (code) => { clearTimeout(t); resolve({ code, out, err: errOut }); });
+    });
+    assert.equal(plain.code, 0);
+    assert.match(plain.err, /--tmux ignored — no tmux session/);
+  } finally {
+    f.cleanup();
+  }
+});
+
 test('run --run-id honors a caller-provided run id', async () => {
   const f = fixture();
   try {

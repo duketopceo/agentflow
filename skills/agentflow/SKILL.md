@@ -51,7 +51,7 @@ replays settled results and re-runs only what never finished.
 | `parallel` | `(thunks) => Promise<results>` | `parallel(files.map(f => () => agent(...)))` — order preserved, `null` per failure |
 | `pipeline` | `(items, ...stages) => Promise<results>` | each item flows through stages; `null` short-circuits that item |
 | `batch` | `(items, opts?) => Promise<results>` | async fan-out on **openrouter** (one OR Batch job per N prompts, ~40–60% off, ≤24h window), **devin** (N cloud sessions — `devin_mode` model, `structured_output` collected; swe-2 models are free), **perplexity** (N `/v1/async/sonar` requests — async accepts **`sonar-deep-research` only**), **openai** (Batches API, ~50% off, 24h) or **anthropic** (Message Batches, ~50% off, 24h). Items: `{prompt, label?, model?, schema?, maxTokens?}`; all share ONE model (`opts.model` or per-item). opts: `batchPollMs` (15s), `batchTimeoutMs` (2h). Results align to input order; each item consumes a normal call index |
-| `phase` | `(name) => void` | labels stderr progress |
+| `phase` | `(name) => void` | labels stderr progress; journaled so `watch`/`tail` group lanes by phase |
 | `log` | `(msg) => void` | stderr; keep secrets out |
 | `args` | array | args after `--` on the CLI |
 | `meta` | object | from `export const meta = {...}` |
@@ -152,9 +152,16 @@ Never retried: `permissionDenied` and `timedOut`. All three settable in
 keeps running, output in `.agentflow/runs/<id>.log`). `agentflow status <id>`
 prints settled/total + outcome (exit 2 while running), `agentflow tail <id>`
 streams journal events until run-end, and `agentflow watch [id]` renders a
-live per-lane terminal view (in-flight spinners, batch poll progress,
-per-call tokens; falls back to `tail` output when piped). Use detach for
-long fan-outs and check back — same model as Claude's detached Workflow.
+live phase-grouped terminal view — each `phase()` becomes a group header
+with done/total counts, lanes list underneath with status + elapsed, and
+settled lanes show a one-line result summary (first sentence of the agent's
+reply — the "what it found"). Declared `meta.phases` with no calls yet render
+as upcoming; the footer carries token totals and counts, and run-end shows
+the big-ASCII spend card. Falls back to `tail` output when piped. Add
+`--tmux` alongside `--detach` to auto-open the watch pane beside your shell
+(needs an active tmux session; the pane stays open on run-end for the spend
+card). Use detach for long fan-outs and check back — same model as Claude's
+detached Workflow.
 
 ## Autonomous operation
 

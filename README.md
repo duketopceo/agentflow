@@ -60,12 +60,31 @@ align to input order; resumable mid-poll.
 
 ## Watching a run
 
-`agentflow watch [run-id]` renders a live per-lane view from the run journal —
-spinning in-flight lanes, batch poll progress, per-call token counts, orphan
-detection — on an alternate screen. Piped output falls back to `tail`-style
-event lines; `status <id>` prints the same totals for scripts. Token usage
-is journaled per call on harnesses that report it (devin, via `--export`)
-and summed in `status`/`watch`.
+`agentflow watch [run-id]` renders a live phase-grouped view from the run
+journal on an alternate screen — each `phase()` in the script becomes a group
+header with done/total counts, lanes list underneath with spinner/status/
+elapsed, and settled lanes carry a one-line "what it found" result summary.
+Phases declared in `meta.phases` but not reached yet show as upcoming, and
+the footer carries ok/failed/running counts, token totals, and the run-id:
+
+```
+deep-research · devin · swe-2-max
+███████░░░░░░░░░░░░░ 1 of ~3 steps · 1:35 · pid 4242
+▶ gather — 1/2
+  ✓ [0] sources (swe-2-max)           ok 81.2s 12k/800
+    Found 14 primary sources on the topic.
+  ◓ [1] papers (swe-2-max)            running 1:26
+▶ synthesize — 0/1
+  ◓ [2] draft (swe-2-max)             running 4s
+◇ report — upcoming
+1 ok · 0 failed · 2 running · tokens 12k/800 · run 2026-10-23T01-00-00-a1b2c3d4
+```
+
+Piped output falls back to `tail`-style event lines; `status <id>` prints the
+same totals for scripts. `run --detach --tmux` opens the watch view in a
+tmux split-pane automatically — the pane stays up after run-end so the
+spend card isn't lost. Token usage is journaled per call on harnesses that
+report it (devin, via `--export`) and summed in `status`/`watch`.
 
 ## Install as an agent plugin
 
@@ -120,7 +139,7 @@ const results = await parallel(files.map((f) => () =>
 const good = results.filter(Boolean);   // a failed call is null, not an exception
 ```
 
-Commands: `run`, `status <run-id>`, `tail <run-id>`, `list`, `doctor`.
+Commands: `run`, `status <run-id>`, `tail <run-id>`, `watch [run-id]`, `list`, `doctor`.
 Useful flags: `--harness`, `--concurrency`, `--via ori`, `--cache`, `--resume <run-id>`,
 `--retries`, `--max-agents`, `--strict`, `--detach`.
 

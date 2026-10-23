@@ -13,7 +13,7 @@ usage:
   agentflow run <script.mjs> [--harness <name>] [--concurrency <n>]
                 [--via ori] [--cache] [--strict] [--max-agents <n>]
                 [--retries <n>] [--resume <run-id>] [--grace <ms>]
-                [--cwd <dir>] [--detach]
+                [--cwd <dir>] [--detach] [--tmux]
                 [-- <script args>...]
   agentflow status <run-id>        progress + outcome from the journal
   agentflow tail <run-id>          stream journal events until run-end
@@ -161,7 +161,7 @@ function detachRun(cwd, rawArgv) {
   const runId = Journal.newRunId();
   mkdirSync(Journal.dirFor(cwd), { recursive: true });
   const logFd = openSync(Journal.pathFor(cwd, runId).replace(/\.jsonl$/, '.log'), 'a');
-  const childArgv = rawArgv.filter((a) => a !== '--detach');
+  const childArgv = rawArgv.filter((a) => a !== '--detach' && a !== '--tmux');
   const dd = childArgv.indexOf('--'); // keep script args trailing
   const head = dd === -1 ? childArgv : childArgv.slice(0, dd);
   const tail = dd === -1 ? [] : childArgv.slice(dd);
@@ -169,7 +169,22 @@ function detachRun(cwd, rawArgv) {
   const child = spawn(process.execPath, args, { detached: true, stdio: ['ignore', logFd, logFd], cwd });
   child.unref();
   process.stdout.write(`run ${runId} (detached, pid ${child.pid})\n  watch:  agentflow watch ${runId}\n  status: agentflow status ${runId}\n`);
+  if (rawArgv.includes('--tmux')) tmuxWatch(cwd, runId);
   return 0;
+}
+
+// --tmux: open a live `watch` pane beside the caller's shell. Requires an
+// active tmux session ($TMUX) — outside tmux there's nowhere to put it, so
+// warn and leave the printed watch command as the path. The trailing read
+// holds the pane open after run-end so the spend card isn't lost to pane
+// teardown.
+function tmuxWatch(cwd, runId) {
+  if (!process.env.TMUX) {
+    process.stderr.write(`agentflow: --tmux ignored — no tmux session (use: agentflow watch ${runId})\n`);
+    return;
+  }
+  const watch = `"${process.execPath}" "${SELF}" watch "${runId}"; printf '\\n— press enter to close —\\n'; read -r _`;
+  spawn('tmux', ['split-window', '-h', '-c', cwd, watch], { stdio: 'ignore' }).unref();
 }
 
 const END_EXIT = { ok: 0, error: 1, interrupted: 130, 'determinism-lint': 1 };
@@ -398,7 +413,17 @@ async function watchCmd(cwd, runId) {
       tick++;
     }
   } finally {
+    // Restore main screen before the last frame: re-printing it below lands
+    // the final state (phases, lanes, spend card) in scrollback — the
+    // alt-screen copy evaporates on restore, which would otherwise take the
+    // card with it (notably in --tmux panes held open by `read`).
     process.stdout.write('\x1b[?25h\x1b[?1049l');
+    if (state) {
+      process.stdout.write(renderFrame(state, {
+        now: Date.now(), width: process.stdout.columns ?? 100, tick,
+        pidAlive: null, color: !process.env.NO_COLOR && !process.env.CI,
+      }) + '\n');
+    }
   }
   const settled = state ? [...state.lanes.values()].filter((l) => l.state === 'ok' || l.state === 'fail').length : 0;
   process.stdout.write(`run ${runId} ended: ${state.done?.reason ?? '?'} — settled ${settled}\n`);

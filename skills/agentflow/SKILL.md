@@ -157,8 +157,11 @@ with done/total counts, lanes list underneath with status + elapsed, and
 settled lanes show a one-line result summary (first sentence of the agent's
 reply — the "what it found"). Declared `meta.phases` with no calls yet render
 as upcoming; the footer carries token totals and counts, and run-end shows
-the big-ASCII spend card. Falls back to `tail` output when piped. Use detach
-for long fan-outs and check back — same model as Claude's detached Workflow.
+the big-ASCII spend card. Falls back to `tail` output when piped. Add
+`--tmux` alongside `--detach` to auto-open the watch pane beside your shell
+(needs an active tmux session; the pane stays open on run-end for the spend
+card). Use detach for long fan-outs and check back — same model as Claude's
+detached Workflow.
 
 ## Autonomous operation
 

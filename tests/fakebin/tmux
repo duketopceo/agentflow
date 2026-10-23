@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+// tmux stub for --tmux detach tests: records argv to FAKEBIN_ARGV_FILE so
+// tests can assert the split-window/watch invocation without a tmux server.
+import { appendFileSync } from 'node:fs';
+if (process.env.FAKEBIN_ARGV_FILE) appendFileSync(process.env.FAKEBIN_ARGV_FILE, process.argv.slice(2).join(' ') + '\n');

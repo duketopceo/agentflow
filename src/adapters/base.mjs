@@ -13,16 +13,23 @@ export function spawnProcess(argv, { cwd, timeout, signal, env } = {}) {
         cwd: cwd ?? process.cwd(),
         env: env ?? process.env,
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
+      });
+      child.on('spawn', () => {
+        try { process.setpgid(child.pid, child.pid); } catch {}
       });
     } catch (e) {
       return resolve({ spawnError: e.message });
     }
     let stdout = '', stderr = '', timedOut = false, done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
-    const timer = timeout ? setTimeout(() => { timedOut = true; child.kill('SIGTERM'); setTimeout(() => child.kill('SIGKILL'), 2000).unref(); }, timeout) : null;
-    const onAbort = () => child.kill('SIGKILL');
+    const killGroup = (sig) => {
+      try { process.kill(-child.pid, sig); } catch { child.kill(sig); }
+    };
+    const timer = timeout ? setTimeout(() => { timedOut = true; killGroup('SIGTERM'); setTimeout(() => killGroup('SIGKILL'), 2000).unref(); }, timeout) : null;
+    const onAbort = () => killGroup('SIGKILL');
     if (signal) {
-      if (signal.aborted) { child.kill('SIGKILL'); }
+      if (signal.aborted) { killGroup('SIGKILL'); }
       else signal.addEventListener('abort', onAbort, { once: true });
     }
     // Decode via StringDecoder: raw Buffer chunks can split a multi-byte char.

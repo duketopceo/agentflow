@@ -121,6 +121,32 @@ test('--detach --tmux: spawns a tmux split-pane watch when $TMUX is set', async 
   }
 });
 
+test('return value prints to stdout; --args-json passes structured args', async () => {
+  const f = fixture();
+  try {
+    f.write('w.mjs', `log('ARGS:' + JSON.stringify(args));
+const a = await agent('x', {label:'a'});
+return { task: args.task, n: args.n, seen: a.text };`);
+    const r = await cli(['run', 'w.mjs', '--harness', 'echo', '--args-json', '{"task":"survey","n":3}'], f.dir);
+    assert.equal(r.code, 0);
+    assert.match(r.out, /"task": "survey"/);          // return value on stdout
+    assert.match(r.out, /"seen": "echo\[a\]: x"/);
+    assert.match(r.err, /ARGS:\{"task":"survey","n":3\}/); // structured, not strings
+
+    // Bad JSON is a clean exit 2.
+    const bad = await cli(['run', 'w.mjs', '--harness', 'echo', '--args-json', '{oops'], f.dir);
+    assert.equal(bad.code, 2);
+    assert.match(bad.err, /not valid JSON/);
+
+    // --args-json and a `--` tail are mutually exclusive.
+    const both = await cli(['run', 'w.mjs', '--harness', 'echo', '--args-json', '{}', '--', 'x'], f.dir);
+    assert.equal(both.code, 2);
+    assert.match(both.err, /mutually exclusive/);
+  } finally {
+    f.cleanup();
+  }
+});
+
 test('run --run-id honors a caller-provided run id', async () => {
   const f = fixture();
   try {

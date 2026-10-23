@@ -251,6 +251,56 @@ log('RESULT:' + JSON.stringify(a.text));`);
   } finally { f.cleanup(); }
 });
 
+test('script return value is captured and journaled on run-end', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const a = await agent('do 0', {label:'a0'});
+return { summary: 'done', seen: a.text };`);
+    const res = await f.run();
+    assert.equal(res.code, 0);
+    assert.deepEqual(res.result, { summary: 'done', seen: 'echo[a0]: do 0' });
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.equal(loaded.ended.reason, 'ok');
+    assert.deepEqual(loaded.ended.result, { summary: 'done', seen: 'echo[a0]: do 0' });
+  } finally { f.cleanup(); }
+});
+
+test('unserializable return value degrades to a repr, not a journal failure', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`return { n: 42n };`);
+    const res = await f.run();
+    assert.equal(res.code, 0);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.equal(loaded.ended.result.unserializable, true);
+  } finally { f.cleanup(); }
+});
+
+test("process.exit(2) inside a script ends the script — never the runner", async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const a = await agent('first', {label:'a0'});
+process.exit(2);
+await agent('never', {label:'a1'});`);
+    const res = await f.run();
+    assert.equal(res.code, 2);            // script's exit code, honored
+    assert.equal(calls.length, 1);        // code after exit() never ran
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.equal(loaded.ended.reason, 'error');
+    assert.ok(f.lines.some((l) => l.includes('exited 2 (process.exit)')));
+  } finally { f.cleanup(); }
+});
+
+test('process.exit(0) inside a script ends ok', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`process.exit(0);`);
+    const res = await f.run();
+    assert.equal(res.code, 0);
+    assert.equal(Journal.load(Journal.pathFor(f.dir, res.runId)).ended.reason, 'ok');
+  } finally { f.cleanup(); }
+});
+
 test('resume with unknown run-id fails cleanly', async () => {
   const f = fixture();
   try {

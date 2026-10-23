@@ -77,7 +77,7 @@ deep-research · devin · swe-2-max
 ▶ synthesize — 0/1
   ◓ [2] draft (swe-2-max)        running 4s
 ◇ report — upcoming
-ok 1 fail 0 running 2 · tokens 12k/800
+1 ok · 0 failed · 2 running · tokens 12k/800
 ```
 
 Piped output falls back to `tail`-style event lines; `status <id>` prints the

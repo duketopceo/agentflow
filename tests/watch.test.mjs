@@ -77,7 +77,7 @@ test('renderFrame: deterministic layout for a fixed state + now + tick', () => {
   assert.match(f, /✓ \[0\] a \(m1\)\s+ok 1\.0s/);
   assert.match(f, /◐ \[1\] b\s+running 58s/);
   assert.match(f, /▶ batch\[2\] b-1\s+in_progress  1\/2 settled/);
-  assert.match(f, /ok 1 fail 0 running 1 · run r1/);
+  assert.match(f, /1 ok · 0 failed · 1 running · run r1/);
   assert.ok(f.split('\n').every((l) => l.length <= 80));
 });
 
@@ -89,7 +89,7 @@ test('renderFrame: final frame shows run-end reason; narrow widths truncate', ()
   ]));
   const f = renderFrame(s, { now: Date.parse('2026-10-11T00:00:06Z'), width: 40, tick: 1 });
   assert.match(f, /run ok/);
-  assert.match(f, /abandoned 1/);
+  assert.match(f, /1 abandoned/);
   assert.ok(f.split('\n').every((l) => l.length <= 40));
 });
 

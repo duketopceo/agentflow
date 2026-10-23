@@ -99,6 +99,7 @@ const cut = (s, n) => {
   return i < s.length ? out + '\x1b[0m' : out;
 };
 
+const visLen = (s) => s.replace(/\x1b\[[0-9;]*m/g, '').length;
 const fmtTok = (n) => (n == null ? '?' : n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 // '37k/41' = prompt/completion tokens for one call or the run total.
 const tokPair = (u) => (u ? ` ${fmtTok(u.promptTokens)}/${fmtTok(u.completionTokens)}` : '');
@@ -238,8 +239,14 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
   const tokTotal = (tot.p || tot.c || tot.k) ? ` · ${P(COL.muted, `tokens ${fmtTok(tot.p)}/${fmtTok(tot.c)}${tot.k ? ` (+${fmtTok(tot.k)} cached)` : ''}`)}` : '';
   const runTag = meta.runId ? ` · ${P(COL.muted, `run ${meta.runId}`)}` : '';
 
+  // Counts read as a sentence ("4 ok · 0 failed"), matching the frame's own
+  // '·' separators. The run-id rides last and is dropped whole rather than
+  // sliced mid-token — a partial id can't be resumed from anyway.
+  const counts = `${nOk} ok · ${nFail} failed · ${state.done ? `${nAbandoned} abandoned` : `${nFlight} running`}`;
+  const footer = `${state.done ? `${P(COL.muted, `run ${state.done.reason}`)} — ` : ''}${counts}${tokTotal}`;
+  lines.push(visLen(footer + runTag) <= w ? footer + runTag : footer);
+
   if (state.done) {
-    lines.push(`${P(COL.muted, `run ${state.done.reason}`)} — ok ${nOk} fail ${nFail} abandoned ${nAbandoned}${tokTotal}${runTag}`);
     // The payoff: total spend, large. costUsd wins when a harness reports
     // dollars (claude); tokens are the spend proxy everywhere else. usdSeen
     // not usd — a genuinely free $0.00 run still gets the dollar card.
@@ -248,8 +255,6 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
     } else if (tot.n) {
       lines.push('', ...bigNumber(fmtTok(tot.p + tot.c)).split('\n'), '     total tokens (in+out)');
     }
-  } else {
-    lines.push(`ok ${nOk} fail ${nFail} running ${nFlight}${tokTotal}${runTag}`);
   }
   return lines.map((l) => cut(l, w)).join('\n') + '\n';
 }

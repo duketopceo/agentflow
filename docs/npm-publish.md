@@ -1,5 +1,14 @@
 # npm publish — done
 
+**Trusted publisher live (2026-10-21):** OIDC connection armed —
+GitHub Actions `duketopceo/agentflow`, workflow `release.yml`, environment
+`npm`, publish + dist-tag allowed. Future releases: `git tag vX.Y.Z &&
+git push --tags` → tests → `npm` env approval → provenance publish, zero
+tokens. Note: the TP setup gate is security-key/passkey-only (no password
+fallback) — the ceremony only completes in a browser profile where the
+user's passkey lives (work-profile BrowserOS worked; neo's clean profile
+and headless contexts cannot reach it — no FIDO device on this machine).
+
 **Published (2026-10-17):** [`@lukedaduke/agentflow@0.2.0`](https://www.npmjs.com/package/@lukedaduke/agentflow)
 — install-verified (`npm i @lukedaduke/agentflow` + `agentflow --version`
 in a scratch dir). Published via a granular access token

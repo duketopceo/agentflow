@@ -38,8 +38,10 @@ agentflow doctor                             # check harness availability
 Each `agent()` call spawns one **non-interactive CLI session** of the selected
 harness as a subprocess, in a fresh context, and resolves to `{text, json}` or
 `null` on failure. Calls queue under a bounded concurrency pool (default 8).
-Every settled call is journaled to `.agentflow/runs/<run-id>.jsonl`; `--resume`
-replays settled results and re-runs only what never finished.
+Every settled call is journaled to `.agentflow/runs/<run-id>.jsonl` with a
+fingerprint of its prompt/model/schema/context; `--resume` replays records
+whose fingerprint still matches and re-executes only what never finished or
+changed since the run (logs `replay miss [i]` — stale results can't surface).
 
 ## Workflow script contract
 
@@ -63,9 +65,10 @@ Constraints:
   strings matching your `phase()` calls (parity with Claude's native contract).
 - No static `import`/`export` — scripts are self-contained. Dynamic
   `await import('node:fs')` works.
-- Determinism is your job: resume replays by call order, so keep `agent()`
-  call order stable across runs (don't drive call order off `Date.now()` or
-  unordered directory listings).
+- Determinism is your job: the fingerprint guard stops stale results from
+  replaying, but reordered/inserted calls still cascade re-executions — keep
+  `agent()` call order stable across runs (don't drive it off `Date.now()`
+  or unordered directory listings).
 
 ## Per-harness adapter table
 

@@ -157,6 +157,41 @@ log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
   } finally { f.cleanup(); }
 }));
 
+test('batch: a changed item resubmits alone — unchanged items replay', withKey(async () => {
+  const f = fixture();
+  try {
+    // Real first run: 3 items complete, journal carries real fingerprints.
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'p1'},{prompt:'p2'}], {model:'m/b'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const stub1 = stubFetch([
+      { status: 202, data: { id: 'b-1', status: 'validating' } },
+      { status: 200, data: completedBody(['A', 'B', 'C']) },
+    ]);
+    const r1 = await f.run({ fetchImpl: stub1.fetchImpl });
+    assert.equal(r1.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', 'B', 'C']);
+
+    // Edit ONLY item 1's prompt — resume must replay 0+2, resubmit just item 1.
+    f.writeScript(`const r = await batch([{prompt:'p0'},{prompt:'EDITED'},{prompt:'p2'}], {model:'m/b'});
+log('RESULT:' + JSON.stringify(r.map(x => x && x.text)));`);
+    const stub2 = stubFetch([
+      { status: 202, data: { id: 'b-2', status: 'validating' } },
+      { status: 200, data: completedBody(['Z']) },
+    ]);
+    const res = await f.run({ resumeId: r1.runId, fetchImpl: stub2.fetchImpl });
+    assert.equal(res.code, 0);
+    assert.deepEqual(f.lastResult(), ['A', 'Z', 'C']);
+    // Exactly one submission, covering one body.
+    const posts = stub2.calls.filter((c) => c.method === 'POST');
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].body.requests.length, 1);
+    // The fresh batch record names its exact item coverage (non-contiguous safe).
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.deepEqual(loaded.batches.at(-1).items, [1]);
+    assert.ok(f.lines.some((l) => l.includes('2 unchanged (replayed), 1 to submit')));
+  } finally { f.cleanup(); }
+}));
+
 test('batch: terminal failed/expired settles every item null with the reason', withKey(async () => {
   const f = fixture();
   try {

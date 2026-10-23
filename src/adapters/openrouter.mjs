@@ -60,7 +60,14 @@ export default {
     if (!r.ok) return httpErr(r.status, data);
     const text = (data?.choices?.[0]?.message?.content ?? '').trim();
     if (!text) return errResult('openrouter: empty completion', { code: 0 });
-    return { ok: true, result: { text, json: spec.schema ? extractJson(text) : null } };
+    const u = data?.usage;
+    const usage = u ? {
+      promptTokens: u.prompt_tokens ?? null,
+      completionTokens: u.completion_tokens ?? null,
+      cachedTokens: u.prompt_tokens_details?.cached_tokens ?? null,
+      costUsd: u.cost ?? null,
+    } : undefined;
+    return { ok: true, result: { text, json: spec.schema ? extractJson(text) : null, ...(usage ? { usage } : {}) } };
   },
 
   // Body for one batch item — same schema-prompt expansion as the sync path.

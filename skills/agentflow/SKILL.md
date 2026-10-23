@@ -152,9 +152,13 @@ Never retried: `permissionDenied` and `timedOut`. All three settable in
 keeps running, output in `.agentflow/runs/<id>.log`). `agentflow status <id>`
 prints settled/total + outcome (exit 2 while running), `agentflow tail <id>`
 streams journal events until run-end, and `agentflow watch [id]` renders a
-live per-lane terminal view (in-flight spinners, batch poll progress,
-per-call tokens; falls back to `tail` output when piped). Use detach for
-long fan-outs and check back — same model as Claude's detached Workflow.
+live phase-grouped terminal view — each `phase()` becomes a group header
+with done/total counts, lanes list underneath with status + elapsed, and
+settled lanes show a one-line result summary (first sentence of the agent's
+reply — the "what it found"). Declared `meta.phases` with no calls yet render
+as upcoming; the footer carries token totals and counts, and run-end shows
+the big-ASCII spend card. Falls back to `tail` output when piped. Use detach
+for long fan-outs and check back — same model as Claude's detached Workflow.
 
 ## Autonomous operation
 

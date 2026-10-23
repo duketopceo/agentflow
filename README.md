@@ -60,12 +60,29 @@ align to input order; resumable mid-poll.
 
 ## Watching a run
 
-`agentflow watch [run-id]` renders a live per-lane view from the run journal —
-spinning in-flight lanes, batch poll progress, per-call token counts, orphan
-detection — on an alternate screen. Piped output falls back to `tail`-style
-event lines; `status <id>` prints the same totals for scripts. Token usage
-is journaled per call on harnesses that report it (devin, via `--export`)
-and summed in `status`/`watch`.
+`agentflow watch [run-id]` renders a live phase-grouped view from the run
+journal on an alternate screen — each `phase()` in the script becomes a group
+header with done/total counts, lanes list underneath with spinner/status/
+elapsed, and settled lanes carry a one-line "what it found" result summary.
+Phases declared in `meta.phases` but not reached yet show as upcoming, and
+the footer totals tokens + ok/fail/running counts:
+
+```
+deep-research · devin · swe-2-max
+███████░░░░░░░░░░░ 1 of ~3 steps · 1:35
+▶ gather — 1/2
+  ✓ [0] sources                  ok 81.2s 12k/800
+    Found 14 primary sources on the topic.
+  ◓ [1] papers (swe-2-max)       running 1:26
+▶ synthesize — 0/1
+  ◓ [2] draft (swe-2-max)        running 4s
+◇ report — upcoming
+ok 1 fail 0 running 2 · tokens 12k/800
+```
+
+Piped output falls back to `tail`-style event lines; `status <id>` prints the
+same totals for scripts. Token usage is journaled per call on harnesses that
+report it (devin, via `--export`) and summed in `status`/`watch`.
 
 ## Install as an agent plugin
 

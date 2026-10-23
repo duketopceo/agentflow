@@ -8,8 +8,9 @@ import openrouter from './openrouter.mjs';
 import perplexity from './perplexity.mjs';
 import openai from './openai.mjs';
 import anthropic from './anthropic.mjs';
+import hermes from './hermes.mjs';
 
-export const adapters = { echo, devin, claude, codex, opencode, ori, openrouter, perplexity, openai, anthropic };
+export const adapters = { echo, devin, claude, codex, opencode, ori, openrouter, perplexity, openai, anthropic, hermes };
 
 export function getAdapter(name) {
   return adapters[name] ?? null;

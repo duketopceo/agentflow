@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center"><b>Write a multi-agent workflow once as a script, then run it on <code>devin</code>, <code>claude</code>, <code>codex</code> or <code>opencode</code>.</b></p>
+<p align="center"><b>Write a multi-agent workflow once as a script, then run it on <code>devin</code>, <code>claude</code>, <code>codex</code>, <code>opencode</code> or <code>hermes</code>.</b></p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@lukedaduke/agentflow"><img src="https://img.shields.io/npm/v/%40lukedaduke%2Fagentflow" alt="npm version"></a>
@@ -102,6 +102,7 @@ The repo carries a manifest for each harness; all resolve to the shared
 | Cursor | `.cursor-plugin/` native; **listed at [cursor.directory/plugins/agentflow](https://cursor.directory/plugins/agentflow)**; official marketplace publisher application submitted (manual review) — root `plugin.json` also covers the open standard |
 | Gemini CLI | `gemini extensions install https://github.com/duketopceo/agentflow` — verified live: `gemini mcp list` shows `agentflow` connected |
 | Any MCP client | `agentflow mcp` — the `.mcp.json` at repo root wires it (Crush, Claude Desktop, Zed, Roo, Kiro…). Tools: `agentflow_run`/`doctor`/`status`/`tail`/`stop` |
+| Hermes Agent | no plugin surface — run `agentflow` CLI directly with `--harness hermes` (first-party adapter: `hermes --cli -z` one-shot; `--safe-mode`/`--yolo` only when the spec pins an explicit `--model`, per hermes's own guardrail). Also wrappable as `--via ori` (`ori hermes`). The shared `skills/agentflow/SKILL.md` doubles as a Hermes skill |
 | Ori/OpenRouter/Perplexity | no plugin surface — run `agentflow` CLI directly with `--harness ori` / `--harness openrouter` / `--harness perplexity` or `--via ori` |
 
 <sub>Devin, OpenCode v1, Claude Code, Codex, Gemini (extension + MCP server), Factory Droid,

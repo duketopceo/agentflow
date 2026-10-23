@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+import { main, wantsSchema, FENCED } from './lib.mjs';
+// Real shape: `hermes --cli -z "prompt"` prints the answer as plain text on
+// stdout (live-verified 2026-10-23: `-z "Reply with exactly: PONG"` -> "PONG").
+await main(process.argv.slice(2), (argv) => {
+  process.stdout.write((wantsSchema(argv) ? FENCED : 'PONG') + '\n');
+}, { denyText: 'Error: approval required for tool use' });

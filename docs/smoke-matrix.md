@@ -122,3 +122,23 @@ and plan KTD4.
 | openai `batch()` | 2-call submit, aligned results, resume re-poll, per-item errors | deferred — no-spend gate |
 | anthropic `agent()` | text-block join, `max_tokens` default/override, headers | deferred — no-spend gate |
 | anthropic `batch()` | 1-call submit, `ended`→`completed`, results_url JSONL, per-item errors | deferred — no-spend gate |
+
+## Hermes adapter (2026-10-23, live-verified single call)
+
+`--harness hermes` — Hermes Agent CLI as a worker. Flags verified against
+`hermes --help` and one live micro-run.
+
+| Step | Result |
+|---|---|
+| `hermes --cli -z "Reply with exactly: PONG"` (live) | verified — plain text `PONG` on stdout, no envelope |
+| `agentflow run` one-agent e2e via the adapter (live, profile default model) | verified — `ping -> ok (3.0s)`, `RESULT: PONG`, journaled `settled=1 ping:ok` |
+| `--safe-mode` semantics | verified refusal without `--model`: "read no profile default: pass --model explicitly" — the adapter therefore emits `--safe-mode`/`--yolo` **only when the spec pins a model** |
+| fakebin e2e (ok / schema / deny / forced-exit) | verified — `node --test tests/hermes.test.mjs` 8 tests + full suite 235 pass |
+| schema | no native flag — prompt-level `withSchemaPrompt` + `extractJson`, same as claude/devin |
+| usage | not journaled — hermes `-z` does not report token usage on stdout |
+
+Operator note: workspace guardrails apply on top (a model allowed one minute
+was guardrail-blocked the next after a provider-side policy change) — model
+availability is the caller's concern, not the adapter's. `hermes` must be on
+PATH; a spawn ENOENT classifies as a normal spawn failure and the run still
+ends ok with the lane failed.

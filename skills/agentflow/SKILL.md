@@ -150,14 +150,16 @@ research says: fan out on parallelizable
 sub-questions, always end in centralized synthesis/verification
 (independent agents amplify errors ~17×), and don't fan out sequential work.
 
-**Guards:** `--strict` rejects scripts using `Date.now`, `Math.random`,
-`new Date`, or `crypto.randomUUID` in the body (line-numbered errors, before
-any agent spawns) — nondeterminism silently misaligns `--resume`'s positional
-replay. `--max-agents <n>` (default 1000) caps total `agent()` calls per run.
-`--retries <n>` (default 0) re-runs transient failures — cheap models flake on
-empty completions under burst; `agent(p, {retries: 2})` for volume stages.
-Never retried: `permissionDenied` and `timedOut`. All three settable in
-`agentflow.json` (`"strict": true`, `"maxAgents": 200`, `"retries": 1`).
+**Guards:** the script body shadows `Date`, `Math` and `crypto` by default;
+`Date.now()`, `new Date()`, `Math.random()` and `crypto.randomUUID()` throw a
+clear error because nondeterminism silently misaligns `--resume`/`--cache`.
+Use `--allow-nondeterminism` to pass the real globals (advisory — a script can
+still reach `globalThis.Date`). `--max-agents <n>` (default 1000) caps total
+`agent()` calls per run. `--retries <n>` (default 0) re-runs transient failures
+— cheap models flake on empty completions under burst; `agent(p, {retries: 2})`
+for volume stages. Never retried: `permissionDenied` and `timedOut`. All three
+settable in `agentflow.json` (`"allowNondeterminism": true`, `"maxAgents": 200`,
+`"retries": 1`).
 
 **Backgrounded runs:** `--detach` returns immediately with a run-id (the child
 keeps running, output in `.agentflow/runs/<id>.log`). `agentflow status <id>`

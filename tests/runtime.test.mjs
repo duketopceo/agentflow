@@ -419,22 +419,32 @@ log('R:' + a.text + '|' + b.text);`);
   }
 });
 
-test('strict: nondeterministic script rejected before any agent runs', async () => {
+test('nondeterministic calls are blocked at runtime by default', async () => {
   const f = fixture();
   try {
     f.writeScript(`const t = Date.now();
+await agent('x', {label:'a'});`);
+    const res = await f.run(); // default: deterministic enforcement
+    assert.equal(res.code, 1);
+    assert.equal(calls.length, 0); // blocked before spawn
+    assert.ok(f.lines.some((l) => l.includes('Date.now') && l.includes('nondeterministic')));
+
+    f.writeScript(`const r = Math.random();
+await agent('x', {label:'a'});`);
+    f.lines.length = 0;
+    const resMath = await f.run();
+    assert.equal(resMath.code, 1);
+    assert.equal(calls.length, 0);
+    assert.ok(f.lines.some((l) => l.includes('Math.random') && l.includes('nondeterministic')));
+
+    // --allow-nondeterminism lets it run.
+    f.writeScript(`const t = Date.now();
 const r = Math.random();
 await agent('x', {label:'a'});
-log('never');`);
-    const res = await f.run({ strict: true });
-    assert.equal(res.code, 1);
-    assert.equal(calls.length, 0); // rejected before spawn
-    assert.ok(f.lines.some((l) => l.includes('line 1') && l.includes('Date.now')));
-    assert.ok(f.lines.some((l) => l.includes('line 2') && l.includes('Math.random')));
-
-    // Same script passes without --strict.
+log('ok');`);
     calls.length = 0;
-    const res2 = await f.run();
+    f.lines.length = 0;
+    const res2 = await f.run({ allowNondeterminism: true });
     assert.equal(res2.code, 0);
     assert.equal(calls.length, 1);
   } finally {
@@ -442,22 +452,39 @@ log('never');`);
   }
 });
 
-test('strict: new Date() and crypto.randomUUID flagged; deterministic script passes', async () => {
+test('deterministic Date/crypto usage passes; nondeterministic forms are blocked', async () => {
   const f = fixture();
   try {
+    // explicit-arg new Date is deterministic and allowed
     f.writeScript(`const d = new Date('2020-01-01');
 await agent('x', {label:'a'});`);
-    const res = await f.run({ strict: true });
-    assert.equal(res.code, 1);
-    assert.ok(f.lines.some((l) => l.includes('new Date')));
+    const res = await f.run();
+    assert.equal(res.code, 0);
 
+    // new Date() with no args is nondeterministic
+    f.writeScript(`const d = new Date();
+await agent('x', {label:'b'});`);
+    f.lines.length = 0;
+    const res2 = await f.run();
+    assert.equal(res2.code, 1);
+    assert.ok(f.lines.some((l) => l.includes('new Date()') && l.includes('nondeterministic')));
+
+    // crypto.randomUUID is nondeterministic
+    f.writeScript(`const id = crypto.randomUUID();
+await agent('x', {label:'c'});`);
+    f.lines.length = 0;
+    const res3 = await f.run();
+    assert.equal(res3.code, 1);
+    assert.ok(f.lines.some((l) => l.includes('randomUUID') && l.includes('nondeterministic')));
+
+    // deterministic string literal is fine
     f.writeScript(`const stamped = 'new Date is fine as a string';
-const fixed = await agent('x', {label:'b'});
+const fixed = await agent('x', {label:'d'});
 log('done');`);
-    const before = f.lines.length; // f.lines accumulates across runs
-    const res2 = await f.run({ strict: true });
-    assert.equal(res2.code, 0);
-    assert.ok(!f.lines.slice(before).some((l) => l.includes('nondeterministic')));
+    f.lines.length = 0;
+    const res4 = await f.run();
+    assert.equal(res4.code, 0);
+    assert.ok(!f.lines.some((l) => l.includes('nondeterministic')));
   } finally {
     f.cleanup();
   }

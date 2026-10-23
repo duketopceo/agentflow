@@ -71,7 +71,8 @@ GitHub API; it may have been renamed) and `docker-agent` PR 2796 from the
 2. **A way to watch a run.** Claude has `/workflows`; LangGraph has LangSmith.
    Agentflow has `status` and `tail` (a journal poller) and `--detach`.
 3. **Determinism enforced, not advised.** Temporal and Claude both enforce it.
-   Agentflow has an opt-in regex lint (`--strict`) that can be bypassed.
+   Agentflow now shadows `Date`, `Math` and `crypto` by default, with
+   `--allow-nondeterminism` to opt out. The old `--strict` regex lint is gone.
 4. **Structured output that is validated.** Claude retries up to five times on
    a schema failure. Agentflow only asks for JSON in the prompt and extracts it
    (`extractJson`); codex alone uses a native schema flag.

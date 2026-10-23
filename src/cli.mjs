@@ -11,7 +11,7 @@ const USAGE = `agentflow — cross-harness dynamic workflows
 
 usage:
   agentflow run <script.mjs> [--harness <name>] [--concurrency <n>]
-                [--via ori] [--cache] [--strict] [--max-agents <n>]
+                [--via ori] [--cache] [--allow-nondeterminism] [--max-agents <n>]
                 [--retries <n>] [--resume <run-id>] [--grace <ms>]
                 [--cwd <dir>] [--detach] [--tmux] [--args-json <json>]
                 [-- <script args>...]
@@ -29,9 +29,9 @@ usage:
 config: agentflow.json in cwd — {"harness": "devin", "concurrency": 8, "via": "ori"}
 `;
 
-// Flags that never take a value — otherwise `run --strict script.mjs` would
+// Flags that never take a value — otherwise `run --cache script.mjs` would
 // swallow the script path as the flag's value.
-const BOOLEAN_FLAGS = new Set(['cache', 'strict', 'detach', 'all', 'watch']);
+const BOOLEAN_FLAGS = new Set(['cache', 'allow-nondeterminism', 'detach', 'all', 'watch']);
 
 function parseFlags(argv) {
   const flags = { _: [] };
@@ -112,7 +112,7 @@ export async function main(argv = process.argv.slice(2)) {
       args,
       via: flags.via ?? config.via ?? null,
       cache: !!(flags.cache || config.cache),
-      strict: !!(flags.strict || config.strict),
+      allowNondeterminism: !!(flags['allow-nondeterminism'] || config.allowNondeterminism),
       maxAgents: num.maxAgents ?? 1000,
       retries: num.retries ?? 0,
       batchPollMs: num.batchPollMs,

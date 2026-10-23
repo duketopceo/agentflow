@@ -1,7 +1,6 @@
 {
   "harness": "devin",
   "concurrency": 8,
-  "strict": true,
   "maxAgents": 1000,
   "cache": true,
   "retries": 1,

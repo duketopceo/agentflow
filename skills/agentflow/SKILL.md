@@ -51,7 +51,7 @@ replays settled results and re-runs only what never finished.
 | `parallel` | `(thunks) => Promise<results>` | `parallel(files.map(f => () => agent(...)))` — order preserved, `null` per failure |
 | `pipeline` | `(items, ...stages) => Promise<results>` | each item flows through stages; `null` short-circuits that item |
 | `batch` | `(items, opts?) => Promise<results>` | async fan-out on **openrouter** (one OR Batch job per N prompts, ~40–60% off, ≤24h window), **devin** (N cloud sessions — `devin_mode` model, `structured_output` collected; swe-2 models are free), **perplexity** (N `/v1/async/sonar` requests — async accepts **`sonar-deep-research` only**), **openai** (Batches API, ~50% off, 24h) or **anthropic** (Message Batches, ~50% off, 24h). Items: `{prompt, label?, model?, schema?, maxTokens?}`; all share ONE model (`opts.model` or per-item). opts: `batchPollMs` (15s), `batchTimeoutMs` (2h). Results align to input order; each item consumes a normal call index |
-| `phase` | `(name) => void` | labels stderr progress |
+| `phase` | `(name) => void` | labels stderr progress; journaled so `watch`/`tail` group lanes by phase |
 | `log` | `(msg) => void` | stderr; keep secrets out |
 | `args` | array | args after `--` on the CLI |
 | `meta` | object | from `export const meta = {...}` |

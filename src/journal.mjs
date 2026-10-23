@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 // JSONL run journal at .agentflow/runs/<run-id>.jsonl.
 // Line 1: run-start. Each settled agent() call: one 'agent' record.
 // Last line on exit: run-end. Resume replays settled records by call index.
+// 'phase'/'in-flight'/'batch-poll' are display metadata — replay ignores them.
 export class Journal {
   static dirFor(cwd) {
     return join(cwd, '.agentflow', 'runs');
@@ -31,7 +32,7 @@ export class Journal {
   }
 
   static load(path) {
-    const meta = { settled: new Map(), ended: null, runStart: null, worktrees: [], batches: [], inFlight: new Map(), batchPolls: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, steps: 0, calls: 0 } };
+    const meta = { settled: new Map(), ended: null, runStart: null, worktrees: [], batches: [], inFlight: new Map(), batchPolls: [], phases: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, steps: 0, calls: 0 } };
     if (!existsSync(path)) return meta;
     for (const line of readFileSync(path, 'utf8').split('\n')) {
       if (!line.trim()) continue;
@@ -58,6 +59,7 @@ export class Journal {
       // Progress records — watch/status render these; replay ignores them.
       else if (rec.type === 'in-flight') meta.inFlight.set(rec.i, rec);
       else if (rec.type === 'batch-poll') meta.batchPolls.push(rec);
+      else if (rec.type === 'phase') meta.phases.push(rec);
     }
     for (const i of meta.inFlight.keys()) if (meta.settled.has(i)) meta.inFlight.delete(i);
     return meta;

@@ -121,3 +121,59 @@ test('SIGINT twice: second Ctrl-C force-aborts instead of waiting out the grace 
     assert.equal(loaded.ended?.reason, 'interrupted');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('extractJson: a balanced-but-invalid block is skipped whole, never returning its nested sub-object', () => {
+  assert.equal(extractJson('Result: {"a": {"b":1} oops}'), null);
+  assert.deepEqual(extractJson('Result: {"a": {"b":1} oops} then {"c":3}'), { c: 3 });
+  // unbalanced outer: still recovers a later complete object
+  assert.deepEqual(extractJson('{ "a": 1, then {"d":4}'), { d: 4 });
+});
+
+test('runtime: a script that returns with un-awaited agent calls aborts the in-flight one and never starts the queued one', async () => {
+  const dir = tmp();
+  try {
+    const started = [];
+    let inflightAborted = null;
+    const adapter = {
+      name: 'hang',
+      async spawnAgent(spec) {
+        started.push(spec.prompt);
+        await new Promise((r) => { spec.signal.addEventListener('abort', r, { once: true }); setTimeout(r, 3000).unref(); });
+        inflightAborted = spec.signal.aborted;
+        return { ok: false, error: { message: 'killed' } };
+      },
+    };
+    writeFileSync(join(dir, 'w.mjs'), `agent('first', {label:'a'}); agent('second', {label:'b'}); await new Promise(r => setTimeout(r, 50));`);
+    const res = await runScript({ scriptPath: join(dir, 'w.mjs'), adapter, concurrency: 1, cwd: dir, err: () => {} });
+    assert.equal(res.code, 0);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(inflightAborted, true, 'in-flight call was not aborted');
+    assert.deepEqual(started, ['first'], 'queued call should never have started');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('cli: numeric flag validation (table)', async () => {
+  const cases = [
+    { args: ['--retries', '0'], ok: true },
+    { args: ['--grace', '0'], ok: true },
+    { args: ['--concurrency', '0'], flag: 'concurrency' },
+    { args: ['--max-agents', '-1'], flag: 'max-agents' },
+    { args: ['--batch-poll', 'x'], flag: 'batch-poll' },
+    { args: ['--retries'], flag: 'retries' },
+    { config: { concurrency: 0 }, args: [], flag: 'concurrency' },
+  ];
+  for (const c of cases) {
+    const dir = tmp();
+    try {
+      writeFileSync(join(dir, 'w.mjs'), `log('ran')`);
+      if (c.config) writeFileSync(join(dir, 'agentflow.json'), JSON.stringify(c.config));
+      const r = await cli(['run', 'w.mjs', '--harness', 'echo', ...c.args], dir);
+      const label = JSON.stringify(c);
+      if (c.ok) assert.equal(r.code, 0, `${label}: ${r.out}`);
+      else {
+        assert.equal(r.code, 2, `${label}: ${r.out}`);
+        assert.match(r.out, new RegExp(`--${c.flag} must be`), label);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+});

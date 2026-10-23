@@ -48,11 +48,15 @@ export function extractJson(text) {
   if (fenced) { try { return JSON.parse(fenced[1].trim()); } catch {} }
   // Try each '{' in turn: prose before the real object may contain stray
   // braces ("use {x} like so: {...}"). Bounded so brace-heavy junk stays cheap.
+  // A balanced block that fails to parse is skipped whole so a nested
+  // sub-object of a malformed outer object is never returned.
   let start = t.indexOf('{');
-  for (let tries = 0; start !== -1 && tries < 64; tries++, start = t.indexOf('{', start + 1)) {
+  for (let tries = 0; start !== -1 && tries < 64; tries++) {
     const end = balancedEnd(t, start);
-    if (end === -1) continue;
-    try { return JSON.parse(t.slice(start, end + 1)); } catch {}
+    if (end !== -1) {
+      try { return JSON.parse(t.slice(start, end + 1)); } catch {}
+    }
+    start = t.indexOf('{', end === -1 ? start + 1 : end + 1);
   }
   return null;
 }

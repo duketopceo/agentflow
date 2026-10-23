@@ -212,12 +212,17 @@ async function statusCmd(cwd, runId, follow) {
   const seen = new Set();
   const print = (rec) => {
     if (rec.type === 'run-start') process.stdout.write(`run started ${rec.script} harness=${rec.harness}\n`);
+    else if (rec.type === 'phase') process.stdout.write(`▶ phase: ${rec.name}\n`);
     else if (rec.type === 'agent') process.stdout.write(`[${rec.i}] ${rec.label} -> ${rec.ok ? 'ok' : 'fail'}${rec.model ? ` (${rec.model})` : ''}\n`);
     else if (rec.type === 'run-end') process.stdout.write(`run ended: ${rec.reason}\n`);
   };
   for (;;) {
     const meta = Journal.load(path);
     if (meta.runStart && !seen.has('s')) { seen.add('s'); print(meta.runStart); }
+    for (const [k, p] of meta.phases.entries()) {
+      const key = `ph${k}`; // index, not name — a script may re-enter a phase
+      if (!seen.has(key)) { seen.add(key); print(p); }
+    }
     for (const w of meta.worktrees) {
       const k = `w${w.i}`;
       if (!seen.has(k)) { seen.add(k); process.stdout.write(`[${w.i}] ${w.label} -> worktree ${w.path}\n`); }
@@ -386,6 +391,7 @@ async function watchCmd(cwd, runId) {
       process.stdout.write('\x1b[H' + renderFrame(state, {
         now: Date.now(), width: process.stdout.columns ?? 100, tick,
         pidAlive: state.done ? null : ['live', 'live-unverified'].includes(pidState(state.meta)),
+        color: !process.env.NO_COLOR && !process.env.CI,
       }));
       if (state.done) break;
       await new Promise((r) => setTimeout(r, 250));

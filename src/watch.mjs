@@ -25,22 +25,33 @@ export function foldState(records) {
   // calls so runtime replay remains unchanged.
   const start = (records ?? []).map((rec) => rec.type).lastIndexOf('run-start');
   const epoch = start === -1 ? (records ?? []) : records.slice(start);
-  const state = { meta: null, lanes: new Map(), batches: new Map(), done: null };
+  const state = { meta: null, lanes: new Map(), batches: new Map(), phases: [], done: null };
+  // phaseName is the phase the NEXT record belongs to. Lanes keep the phase
+  // that was active when they appeared (an un-awaited agent can outlive its
+  // phase); the agent record preserves the in-flight lane's stamp.
+  let phaseName = null;
   for (const rec of epoch) {
-    if (rec.type === 'run-start') state.meta = rec;
-    else if (rec.type === 'in-flight') {
-      state.lanes.set(rec.i, { i: rec.i, label: rec.label, model: rec.model, batch: rec.batch ?? null, state: 'in-flight', at: rec.at });
+    if (rec.type === 'run-start') { state.meta = rec; phaseName = null; }
+    else if (rec.type === 'phase') {
+      phaseName = String(rec.name ?? '');
+      state.phases.push({ name: phaseName, at: rec.at ?? null, nextI: rec.nextI ?? null });
+    } else if (rec.type === 'in-flight') {
+      state.lanes.set(rec.i, { i: rec.i, label: rec.label, model: rec.model, batch: rec.batch ?? null, state: 'in-flight', at: rec.at, phase: phaseName });
     } else if (rec.type === 'agent') {
+      const prior = state.lanes.get(rec.i);
       state.lanes.set(rec.i, {
         i: rec.i, label: rec.label, model: rec.model,
         state: rec.ok ? 'ok' : 'fail', at: rec.at, elapsed: rec.elapsed,
+        batch: prior?.batch ?? null,
+        phase: prior?.phase ?? phaseName,
         error: rec.ok ? null : (rec.error?.message ?? 'failed'),
         usage: rec.result?.usage ?? rec.error?.usage ?? null,
+        summary: rec.ok ? firstLine(rec.result?.text) : null,
       });
     } else if (rec.type === 'batch') {
-      state.batches.set(rec.batch_id, { id: rec.batch_id, firstI: rec.firstI, count: rec.count, model: rec.model, status: 'submitted', poll: null });
+      state.batches.set(rec.batch_id, { id: rec.batch_id, firstI: rec.firstI, count: rec.count, model: rec.model, status: 'submitted', poll: null, phase: phaseName });
     } else if (rec.type === 'batch-poll') {
-      const b = state.batches.get(rec.batch_id) ?? { id: rec.batch_id, firstI: null, count: rec.total ?? null, model: null, poll: null };
+      const b = state.batches.get(rec.batch_id) ?? { id: rec.batch_id, firstI: null, count: rec.total ?? null, model: null, poll: null, phase: null };
       b.status = rec.status;
       b.poll = rec;
       state.batches.set(rec.batch_id, b);
@@ -54,9 +65,39 @@ export function foldState(records) {
   return state;
 }
 
+// The lane's "what it found" line: first non-empty line of result text,
+// heading marks stripped, cut at the first sentence boundary when one is
+// near enough that a reader still gets the gist.
+const firstLine = (text) => {
+  if (typeof text !== 'string') return null;
+  const raw = text.split('\n').map((l) => l.trim()).find(Boolean);
+  if (!raw) return null;
+  const s = raw.replace(/^#{1,6}\s+/, '');
+  const cut = s.indexOf('. ');
+  return cut > 0 && cut < 160 ? s.slice(0, cut + 1) : s;
+};
+
 const SPIN = ['◐', '◓', '◑', '◒'];
-const ICON = { 'in-flight': '◐', ok: '●', fail: '○', abandoned: '◌' };
+// DESIGN.md glyphs: status is glyph + word, never colour alone.
+const ICON = { ok: '✓', fail: '✗', abandoned: '◌' };
+const PHASE_ICON = { done: '✓', active: '▶', pending: '◇' };
+// DESIGN.md dark-canvas tokens (truecolor). Applied only when `color` is on;
+// monochrome terminals get identical text with zero escapes.
+const COL = { teal: [79, 209, 197], green: [95, 208, 138], red: [255, 138, 128], amber: [242, 184, 75], muted: [154, 164, 178] };
+
 const trunc = (s, n) => (String(s ?? '').length > n ? String(s).slice(0, Math.max(1, n - 1)) + '…' : String(s ?? ''));
+// Width cut that skips ANSI escapes — trunc() counts bytes, this counts
+// visible cells, so a coloured line is never sliced mid-escape.
+const cut = (s, n) => {
+  if (!s.includes('\x1b')) return s.slice(0, n);
+  let out = '', vis = 0, i = 0;
+  while (i < s.length && vis < n) {
+    const esc = /^\x1b\[[0-9;]*m/.exec(s.slice(i));
+    if (esc) { out += esc[0]; i += esc[0].length; continue; }
+    out += s[i++]; vis++;
+  }
+  return i < s.length ? out + '\x1b[0m' : out;
+};
 
 const fmtTok = (n) => (n == null ? '?' : n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 // '37k/41' = prompt/completion tokens for one call or the run total.
@@ -93,60 +134,112 @@ export function bigNumber(str) {
 }
 
 const progressBar = (done, total, seg = 24) => {
-  if (!total) return '';
-  const fill = Math.round((done / total) * seg);
-  return `${'█'.repeat(fill)}${'░'.repeat(seg - fill)} ${done}/${total}`;
+  const fill = total ? Math.round((done / total) * seg) : 0;
+  return `${'█'.repeat(fill)}${'░'.repeat(seg - fill)}`;
 };
 
 // One frame of the watch view. `tick` rotates the in-flight spinner;
 // `now`/`runStart.at` derive ages deterministically for tests.
-export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pidAlive = null } = {}) {
+export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pidAlive = null, color = false } = {}) {
   const w = Math.max(40, width);
   const lines = [];
   const meta = state.meta ?? {};
   const started = meta.at ? Date.parse(meta.at) : now;
   const lanes = [...state.lanes.values()].sort((a, b) => a.i - b.i);
-  const done = lanes.filter((l) => l.state === 'ok' || l.state === 'fail');
   const nOk = lanes.filter((l) => l.state === 'ok').length;
   const nFail = lanes.filter((l) => l.state === 'fail').length;
   const nFlight = lanes.filter((l) => l.state === 'in-flight').length;
+  const nAbandoned = lanes.filter((l) => l.state === 'abandoned').length;
+  const settled = nOk + nFail + nAbandoned;
   const spin = SPIN[tick % SPIN.length];
+  const P = (rgb, s) => (color && s ? `\x1b[38;2;${rgb.join(';')}m${s}\x1b[0m` : s);
 
-  lines.push(`agentflow — ${meta.runId ?? '?'}`);
+  // Title: the workflow's own name — a reader cares what the run IS, not its
+  // id. Run-id is demoted to the footer.
+  const models = [...new Set(lanes.map((l) => l.model).filter(Boolean))];
+  const modelStr = models.length ? ` · ${models.slice(0, 3).join(',')}${models.length > 3 ? ',…' : ''}` : '';
+  lines.push(P(COL.teal, `${meta.name ?? meta.script ?? '?'} · ${meta.harness ?? '?'}${modelStr}`));
+
+  // Header: progress + "N of ~M steps" (M is calls seen so far — scripts are
+  // dynamic, the total is always an estimate) + elapsed + liveness.
+  const bar = progressBar(settled, lanes.length, Math.min(20, Math.max(8, Math.floor(w / 4))));
   const alive = state.done ? `ended ${state.done.reason}` : (pidAlive === false ? 'pid gone — orphaned?' : (meta.pid ? `pid ${meta.pid}` : 'running'));
-  lines.push(`${trunc(meta.script ?? '?', Math.floor(w / 3))} · ${meta.harness ?? '?'} · ${fmtSecs(now - started)} · ${alive}`);
-  lines.push(progressBar(done.length, lanes.length, Math.min(24, w - 10)));
+  lines.push(`${bar} ${settled} of ~${lanes.length} steps · ${fmtSecs(now - started)} · ${alive}`);
 
-  for (const lane of lanes) {
-    const tag = `[${lane.i}]`;
-    const model = lane.model ? ` (${lane.model})` : '';
-    const label = trunc(`${tag} ${lane.label ?? ''}${model}`, Math.floor(w * 0.45));
-    if (lane.state === 'in-flight') {
-      const age = lane.at ? ` ${fmtSecs(now - Date.parse(lane.at))}` : '';
-      lines.push(`${spin} ${label.padEnd(Math.floor(w * 0.45))} running${age}`);
-    } else if (lane.state === 'ok') {
-      lines.push(`${ICON.ok} ${label.padEnd(Math.floor(w * 0.45))} ok ${lane.elapsed ?? ''}s${tokPair(lane.usage)}`);
-    } else if (lane.state === 'fail') {
-      lines.push(`${ICON.fail} ${label.padEnd(Math.floor(w * 0.45))} fail ${lane.elapsed ?? ''}s${tokPair(lane.usage)}  ${trunc(lane.error, Math.floor(w * 0.35))}`);
-    } else {
-      lines.push(`${ICON.abandoned} ${label.padEnd(Math.floor(w * 0.45))} abandoned`);
+  const labW = Math.floor(w * 0.42);
+  const laneRow = (l) => {
+    const model = l.model ? ` (${l.model})` : '';
+    const label = trunc(`[${l.i}] ${l.label ?? ''}${model}`, labW).padEnd(labW);
+    if (l.state === 'in-flight') {
+      const age = l.at ? ` ${fmtSecs(now - Date.parse(l.at))}` : '';
+      return `  ${P(COL.teal, spin)} ${label} ${P(COL.teal, 'running')}${age}`;
     }
-  }
-
-  for (const b of state.batches.values()) {
+    if (l.state === 'ok') return `  ${P(COL.green, ICON.ok)} ${label} ${P(COL.green, 'ok')} ${l.elapsed ?? ''}s${tokPair(l.usage)}`;
+    if (l.state === 'fail') return `  ${P(COL.red, ICON.fail)} ${label} ${P(COL.red, 'fail')} ${l.elapsed ?? ''}s${tokPair(l.usage)}  ${P(COL.red, trunc(l.error, Math.floor(w * 0.3)))}`;
+    return `  ${P(COL.amber, ICON.abandoned)} ${label} ${P(COL.amber, 'abandoned')}`;
+  };
+  const findRow = (l) => (l.state === 'ok' && l.summary ? `    ${P(COL.muted, trunc(l.summary, Math.min(90, w - 6)))}` : null);
+  const batchRow = (b) => {
     const counts = b.poll?.total != null ? `  ${b.poll.settled ?? '?'}/${b.poll.total} settled` : '';
     const pollAt = b.poll?.at ? `  last poll ${fmtSecs(now - Date.parse(b.poll.at))} ago` : '';
-    lines.push(`▶ batch${b.count != null ? `[${b.count}]` : ''} ${trunc(b.id, 28)}  ${b.status}${counts}${pollAt}`);
+    return `  ${P(COL.teal, '▶')} batch${b.count != null ? `[${b.count}]` : ''} ${trunc(b.id, 28)}  ${b.status}${counts}${pollAt}`;
+  };
+
+  // Group lanes under phases. Order = declared meta.phases first, then
+  // phase records the script never declared — groups are then positioned by
+  // the call index where the phase began, so un-phased lanes (a lone agent()
+  // before/between phase() calls) sort into their real place instead of
+  // clumping at one end. Pending declared phases (no record yet) sink last.
+  const declared = Array.isArray(meta.phases) ? meta.phases.filter((p) => typeof p === 'string') : [];
+  const order = [];
+  for (const n of declared) if (!order.includes(n)) order.push(n);
+  for (const p of state.phases) if (!order.includes(p.name)) order.push(p.name);
+  const groups = order.map((name) => ({
+    name,
+    rec: state.phases.find((p) => p.name === name) ?? null,
+    lanes: lanes.filter((l) => l.phase === name),
+    batches: [...state.batches.values()].filter((b) => b.phase === name),
+  }));
+  const seq = [
+    ...groups.map((g) => ({ kind: 'group', g, pos: g.rec?.nextI ?? Math.min(Infinity, ...g.lanes.map((l) => l.i)) })),
+    ...lanes.filter((l) => l.phase == null).map((l) => ({ kind: 'lane', l, pos: l.i })),
+    ...[...state.batches.values()].filter((b) => b.phase == null).map((b) => ({ kind: 'batch', b, pos: b.firstI ?? Infinity })),
+  ].sort((a, b) => a.pos - b.pos);
+
+  for (const item of seq) {
+    if (item.kind === 'lane') {
+      lines.push(laneRow(item.l));
+      const f = findRow(item.l);
+      if (f) lines.push(f);
+      continue;
+    }
+    if (item.kind === 'batch') { lines.push(batchRow(item.b)); continue; }
+    const g = item.g;
+    const gSettled = g.lanes.filter((l) => l.state !== 'in-flight').length;
+    const gFail = g.lanes.filter((l) => l.state === 'fail').length;
+    const gRunning = g.lanes.some((l) => l.state === 'in-flight');
+    const glyph = !g.rec ? PHASE_ICON.pending : (gRunning || (!g.lanes.length && !state.done)) ? PHASE_ICON.active : PHASE_ICON.done;
+    const c = !g.rec ? COL.amber : glyph === PHASE_ICON.active ? COL.teal : COL.green;
+    const status = !g.rec
+      ? (state.done ? 'not reached' : 'upcoming')
+      : (g.lanes.length ? `${gSettled}/${g.lanes.length}${gFail ? ` · ${gFail} failed` : ''}` : (state.done ? 'no calls' : 'in progress'));
+    lines.push(`${P(c, `${glyph} ${trunc(g.name, Math.floor(w * 0.5))}`)} ${P(COL.muted, `— ${status}`)}`);
+    for (const l of g.lanes) {
+      lines.push(laneRow(l));
+      const f = findRow(l);
+      if (f) lines.push(f);
+    }
+    for (const b of g.batches) lines.push(batchRow(b));
   }
 
-  const nAbandoned = lanes.filter((l) => l.state === 'abandoned').length;
   const tot = lanes.reduce((a, l) => (l.usage
-    ? { p: a.p + (l.usage.promptTokens ?? 0), c: a.c + (l.usage.completionTokens ?? 0), usd: a.usd + (l.usage.costUsd ?? 0), usdSeen: a.usdSeen || l.usage.costUsd != null, n: a.n + 1 }
-    : a), { p: 0, c: 0, usd: 0, usdSeen: false, n: 0 });
-  const tokTotal = tot.n ? `  tok ${fmtTok(tot.p)}/${fmtTok(tot.c)}` : '';
+    ? { p: a.p + (l.usage.promptTokens ?? 0), c: a.c + (l.usage.completionTokens ?? 0), k: a.k + (l.usage.cachedTokens ?? 0), usd: a.usd + (l.usage.costUsd ?? 0), usdSeen: a.usdSeen || l.usage.costUsd != null, n: a.n + 1 }
+    : a), { p: 0, c: 0, k: 0, usd: 0, usdSeen: false, n: 0 });
+  const tokTotal = tot.n ? ` · ${P(COL.muted, `tokens ${fmtTok(tot.p)}/${fmtTok(tot.c)}${tot.k ? ` (+${fmtTok(tot.k)} cached)` : ''}`)}` : '';
+  const runTag = meta.runId ? ` · ${P(COL.muted, `run ${meta.runId}`)}` : '';
 
   if (state.done) {
-    lines.push(`run ${state.done.reason} — ok ${nOk} failed ${nFail} abandoned ${nAbandoned}${tokTotal}`);
+    lines.push(`${P(COL.muted, `run ${state.done.reason}`)} — ok ${nOk} fail ${nFail} abandoned ${nAbandoned}${tokTotal}${runTag}`);
     // The payoff: total spend, large. costUsd wins when a harness reports
     // dollars (claude); tokens are the spend proxy everywhere else. usdSeen
     // not usd — a genuinely free $0.00 run still gets the dollar card.
@@ -156,7 +249,7 @@ export function renderFrame(state, { now = Date.now(), width = 100, tick = 0, pi
       lines.push('', ...bigNumber(fmtTok(tot.p + tot.c)).split('\n'), '     total tokens (in+out)');
     }
   } else {
-    lines.push(`settled ${done.length} · ok ${nOk} failed ${nFail} running ${nFlight}${tokTotal}`);
+    lines.push(`ok ${nOk} fail ${nFail} running ${nFlight}${tokTotal}${runTag}`);
   }
-  return lines.map((l) => l.slice(0, w)).join('\n') + '\n';
+  return lines.map((l) => cut(l, w)).join('\n') + '\n';
 }

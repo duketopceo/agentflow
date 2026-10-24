@@ -485,6 +485,23 @@ log('done');`);
     const res4 = await f.run();
     assert.equal(res4.code, 0);
     assert.ok(!f.lines.some((l) => l.includes('nondeterministic')));
+
+    // scripts may declare their own Date/Math/crypto locals without clashing
+    // with the shim parameters.
+    f.writeScript(`const Date = (arg) => 'custom:' + arg;
+const Math = { random: () => 0.5 };
+const crypto = { randomUUID: () => 'fixed-uuid' };
+const d = Date('x');
+const r = Math.random();
+const id = crypto.randomUUID();
+const a = await agent('x', {label:'e'});
+log('RESULT:' + JSON.stringify({d, r, id}));`);
+    f.lines.length = 0;
+    calls.length = 0;
+    const res5 = await f.run();
+    assert.equal(res5.code, 0);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(f.lastResult(), { d: 'custom:x', r: 0.5, id: 'fixed-uuid' });
   } finally {
     f.cleanup();
   }

@@ -540,7 +540,17 @@ export async function runScript(opts) {
 
   let fn;
   try {
-    fn = new AsyncFunction('agent', 'parallel', 'pipeline', 'phase', 'log', 'batch', 'args', 'meta', 'Date', 'Math', 'crypto', body);
+    // Wrap the body in a nested block so scripts can still declare their own
+    // `Date`, `Math`, or `crypto` variables while the shims shadow the globals.
+    const wrapped = `{
+  const Date = __agentflowDate;
+  const Math = __agentflowMath;
+  const crypto = __agentflowCrypto;
+  {
+${body}
+  }
+}`;
+    fn = new AsyncFunction('agent', 'parallel', 'pipeline', 'phase', 'log', 'batch', 'args', 'meta', '__agentflowDate', '__agentflowMath', '__agentflowCrypto', wrapped);
   } catch (e) {
     journal.append({ type: 'run-end', reason: 'error', at: new Date().toISOString() });
     err(`agentflow: syntax error in ${scriptName}: ${e.message}`);

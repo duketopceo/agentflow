@@ -142,7 +142,7 @@ const good = results.filter(Boolean);   // a failed call is null, not an excepti
 
 Commands: `run`, `status <run-id>`, `tail <run-id>`, `watch [run-id]`, `list`, `doctor`.
 Useful flags: `--harness`, `--concurrency`, `--via ori`, `--cache`, `--resume <run-id>`,
-`--retries`, `--max-agents`, `--strict`, `--detach`.
+`--retries`, `--max-agents`, `--allow-nondeterminism`, `--detach`.
 
 ## How it works
 

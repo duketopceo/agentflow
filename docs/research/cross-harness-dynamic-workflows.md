@@ -103,7 +103,7 @@ harness — the shared `skills/` + `workflows/` content is identical.
 | Claude capability | agentflow status |
 |---|---|
 | In-process pooled executor, background task + task id | Subprocess per `agent()` (seconds startup); foreground run, Ctrl-C -> resumable journal. `--detach` mode is an open follow-up. |
-| Determinism guard (reject `Date.now`/`Math.random` in scripts) | Not enforced — SKILL.md teaches call-order stability instead. A `--strict` lint flag is a candidate follow-up. |
+| Determinism guard (reject `Date.now`/`Math.random`/`crypto.randomUUID` in scripts) | Enforced at runtime by default — `Date`, `Math` and `crypto` are shadowed; `--allow-nondeterminism` opts out. Advisory: scripts can still reach `globalThis.Date`. |
 | `meta.phases` required | Accepted and documented; not enforced. |
 | Per-agent worktree | `worktree` spec field exists; honored by codex (`--worktree`); devin `-p` has no flag — local CLI gap, documented. |
 | Per-agent cost/token reporting | Not surfaced — harness output formats vary. Follow-up. |

@@ -23,27 +23,51 @@ export const fpOf = (harness, spec) => createHash('sha256').update(JSON.stringif
 })).digest('hex').slice(0, 16);
 const replayable = (rec, fp) => rec != null && (rec.fp == null || rec.fp === fp);
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const RealDate = globalThis.Date;
+const RealMath = globalThis.Math;
+const RealCrypto = globalThis.crypto ?? {};
 
-// Determinism lint — mirror of Claude's inline-Workflow contract. A
-// nondeterministic script body silently misaligns --resume's positional replay;
-// --cache survives it but the journal trust does not. Reports real line numbers.
-const NONDETERMINISTIC = /\b(?:Date\.now|Math\.random|new Date|crypto\.randomUUID)\b/g;
-export function lintDeterminism(source) {
-  // Blank out quoted strings so 'new Date' in a literal doesn't false-positive.
-  // Template literals are kept: `${}` interpolations can hold real calls.
-  const scanned = source.replace(/(['"])(?:\\.|(?!\1)[^\\\n])*\1/g, '""');
-  const hits = [];
-  for (const m of scanned.matchAll(NONDETERMINISTIC)) {
-    hits.push({ line: scanned.slice(0, m.index).split('\n').length, construct: m[0] });
+// Runtime determinism guard — shadow Date, Math and crypto in the script body.
+// The script runs as an AsyncFunction in the host process, so this is advisory:
+// a motivated script can still reach globalThis.Date etc. By default we throw on
+// the common nondeterministic calls; --allow-nondeterminism passes the real ones.
+function makeShimDate() {
+  function Date(...args) {
+    if (new.target === undefined) throw new Error('agentflow: direct Date() is nondeterministic; use --allow-nondeterminism to opt out');
+    if (args.length === 0) throw new Error('agentflow: new Date() is nondeterministic; use --allow-nondeterminism to opt out');
+    return new RealDate(...args);
   }
-  return hits;
+  Date.now = () => { throw new Error('agentflow: Date.now() is nondeterministic; use --allow-nondeterminism to opt out'); };
+  Date.parse = RealDate.parse;
+  Date.UTC = RealDate.UTC;
+  Date.prototype = RealDate.prototype;
+  return Date;
+}
+
+const shimMath = new Proxy(RealMath, {
+  get(t, p) {
+    if (p === 'random') return () => { throw new Error('agentflow: Math.random() is nondeterministic; use --allow-nondeterminism to opt out'); };
+    return t[p];
+  },
+});
+
+const shimCrypto = new Proxy(RealCrypto, {
+  get(t, p) {
+    if (p === 'randomUUID' || p === 'getRandomValues') return () => { throw new Error(`agentflow: crypto.${String(p)}() is nondeterministic; use --allow-nondeterminism to opt out`); };
+    return t[p];
+  },
+});
+
+function makeDeterminismShims(allow) {
+  if (allow) return { Date: RealDate, Math: RealMath, crypto: RealCrypto };
+  return { Date: makeShimDate(), Math: shimMath, crypto: shimCrypto };
 }
 
 // Extract `export const meta = {...}` — the script's only supported export.
 // The object is a plain literal (same constraint as Claude's workflow meta);
 // it is removed from the evaluated source because `export` is illegal inside
 // the async wrapper the script runs in.
-function extractMeta(source, scriptName) {
+function extractMeta(source, scriptName, shims) {
   const m = /export\s+const\s+meta\s*=\s*/.exec(source);
   if (!m) return { meta: {}, source };
   const start = m.index + m[0].length;
@@ -62,7 +86,9 @@ function extractMeta(source, scriptName) {
   }
   if (depth !== 0) throw new SyntaxError(`${scriptName}: export const meta literal is unterminated`);
   const literal = source.slice(start, end);
-  const meta = new Function(`return (${literal})`)();
+  // Evaluate the meta literal with the same determinism shims the script body
+  // will run under, so a nondeterministic `Date.now()` in meta cannot slip past.
+  const meta = new Function('Date', 'Math', 'crypto', `return (${literal})`)(shims.Date, shims.Math, shims.crypto);
   // Remove the whole statement (plus trailing semicolon/newline if present).
   let tail = end;
   while (tail < source.length && /[\s;]/.test(source[tail])) tail++;
@@ -119,6 +145,7 @@ export async function runScript(opts) {
     batchTimeoutMs = 2 * 3600_000,
     fetchImpl = undefined,
     sleep: sleepImpl = undefined,
+    allowNondeterminism = false,
     err = (s) => process.stderr.write(s + '\n'),
   } = opts;
 
@@ -131,21 +158,15 @@ export async function runScript(opts) {
     return { code: 1 };
   }
 
+  const shims = makeDeterminismShims(allowNondeterminism);
+  const { Date: shimDate, Math: shimMath, crypto: shimCrypto } = shims;
+
   let meta, body;
   try {
-    ({ meta, source: body } = extractMeta(source, scriptName));
+    ({ meta, source: body } = extractMeta(source, scriptName, shims));
   } catch (e) {
     err(`agentflow: ${e.message}`);
     return { code: 1 };
-  }
-
-  if (opts.strict) {
-    const hits = lintDeterminism(source);
-    if (hits.length) {
-      for (const h of hits) err(`agentflow: line ${h.line}: ${h.construct} is nondeterministic (--strict)`);
-      err('agentflow: nondeterministic scripts silently misalign --resume replays; fix or drop --strict');
-      return { code: 1 };
-    }
   }
 
   // Resume: replay settled results by call index, re-execute the rest.
@@ -519,7 +540,17 @@ export async function runScript(opts) {
 
   let fn;
   try {
-    fn = new AsyncFunction('agent', 'parallel', 'pipeline', 'phase', 'log', 'batch', 'args', 'meta', body);
+    // Wrap the body in a nested block so scripts can still declare their own
+    // `Date`, `Math`, or `crypto` variables while the shims shadow the globals.
+    const wrapped = `{
+  const Date = __agentflowDate;
+  const Math = __agentflowMath;
+  const crypto = __agentflowCrypto;
+  {
+${body}
+  }
+}`;
+    fn = new AsyncFunction('agent', 'parallel', 'pipeline', 'phase', 'log', 'batch', 'args', 'meta', '__agentflowDate', '__agentflowMath', '__agentflowCrypto', wrapped);
   } catch (e) {
     journal.append({ type: 'run-end', reason: 'error', at: new Date().toISOString() });
     err(`agentflow: syntax error in ${scriptName}: ${e.message}`);
@@ -534,7 +565,7 @@ export async function runScript(opts) {
   let ret;
   process.exit = (c = 0) => { throw { [SCRIPT_EXIT]: c }; };
   try {
-    ret = await fn(agent, parallel, pipeline, phase, log, batch, args, meta);
+    ret = await fn(agent, parallel, pipeline, phase, log, batch, args, meta, shimDate, shimMath, shimCrypto);
     // If a signal is mid-handling, wait for it: in-flight results must be
     // journaled and the exit code must be the signal code, not success.
     if (signalPromise) realExit(await signalPromise);

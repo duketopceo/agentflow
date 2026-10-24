@@ -60,7 +60,7 @@ test('cli: boolean flags before the script path do not swallow it', async () => 
   const dir = tmp();
   try {
     writeFileSync(join(dir, 'w.mjs'), `log('ran')`);
-    for (const flag of ['--strict', '--cache']) {
+    for (const flag of ['--allow-nondeterminism', '--cache']) {
       const r = await cli(['run', flag, 'w.mjs', '--harness', 'echo'], dir);
       assert.equal(r.code, 0, `${flag}: ${r.out}`);
       assert.match(r.out, /ran/);

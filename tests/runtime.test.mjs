@@ -565,6 +565,38 @@ log('done');`);
   }
 });
 
+test('schema: parse/validation failures repair-retry up to schemaRetries, then null with schema error', async () => {
+  const f = fixture();
+  try {
+    // Flaky JSON: first call returns unparseable text, second returns valid.
+    process.env.AGENTFLOW_ECHO_SCHEMA_FLAKY = 'sflaky';
+    f.writeScript(`const r = await agent('x', {label:'sflaky', schema:{type:'object'}});
+log('RESULT:' + JSON.stringify(r?.json));`);
+    calls.length = 0;
+    const res = await f.run({ schemaRetries: 1 });
+    assert.equal(res.code, 0);
+    assert.equal(calls.length, 2); // bad then good
+    assert.deepEqual(f.lastResult(), { echo: 'sflaky' });
+    assert.ok(f.lines.some((l) => l.includes('sflaky schema retry 1/1')));
+
+    // Validation failure: parse succeeds but missing required field.
+    delete process.env.AGENTFLOW_ECHO_SCHEMA_FLAKY;
+    process.env.AGENTFLOW_ECHO_SCHEMA_BAD = 'sbad';
+    f.writeScript(`const r = await agent('x', {label:'sbad', schema:{type:'object', required:['name']}});
+log('done');`);
+    f.lines.length = 0;
+    calls.length = 0;
+    const res2 = await f.run({ schemaRetries: 1 });
+    assert.equal(res2.code, 0);
+    assert.equal(calls.length, 2); // 1 + 1 retry
+    assert.ok(f.lines.some((l) => l.includes('schema:') && l.includes('name')));
+  } finally {
+    delete process.env.AGENTFLOW_ECHO_SCHEMA_FLAKY;
+    delete process.env.AGENTFLOW_ECHO_SCHEMA_BAD;
+    f.cleanup();
+  }
+});
+
 test("worktree 'auto': call runs in a provisioned git worktree, journaled", async () => {
   const dir = mkdtempSync(join(tmpdir(), 'af-wt-'));
   try {

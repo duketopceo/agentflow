@@ -566,6 +566,7 @@ export async function runScript(opts) {
     // Wrap the body in a nested block so scripts can still declare their own
     // `Date`, `Math`, or `crypto` variables while the shims shadow the globals.
     const wrapped = `{
+  const cwd = __agentflowCwd;
   const Date = __agentflowDate;
   const Math = __agentflowMath;
   const crypto = __agentflowCrypto;
@@ -573,7 +574,7 @@ export async function runScript(opts) {
 ${body}
   }
 }`;
-    fn = new AsyncFunction('agent', 'parallel', 'pipeline', 'phase', 'log', 'batch', 'args', 'meta', '__agentflowDate', '__agentflowMath', '__agentflowCrypto', wrapped);
+    fn = new AsyncFunction('agent', 'parallel', 'pipeline', 'phase', 'log', 'batch', 'args', 'meta', '__agentflowDate', '__agentflowMath', '__agentflowCrypto', '__agentflowCwd', wrapped);
   } catch (e) {
     journal.append({ type: 'run-end', reason: 'error', at: new Date().toISOString() });
     err(`agentflow: syntax error in ${scriptName}: ${e.message}`);
@@ -588,7 +589,7 @@ ${body}
   let ret;
   process.exit = (c = 0) => { throw { [SCRIPT_EXIT]: c }; };
   try {
-    ret = await fn(agent, parallel, pipeline, phase, log, batch, args, meta, shimDate, shimMath, shimCrypto);
+    ret = await fn(agent, parallel, pipeline, phase, log, batch, args, meta, shimDate, shimMath, shimCrypto, cwd);
     // If a signal is mid-handling, wait for it: in-flight results must be
     // journaled and the exit code must be the signal code, not success.
     if (signalPromise) realExit(await signalPromise);

@@ -62,7 +62,7 @@ picked up. Application code is out of scope for this PR.
   `docs/smoke-matrix.md`; keep the script, generate the table from it, delete the prose.
 
 ### U3. Replay guard: refuse stale results on `--resume`
-- **Status:** planned. Evidence: `src/runtime.mjs` replays `prior.settled.get(i)` by
+- **Status:** done. Evidence: `src/runtime.mjs` replays `prior.settled.get(i)` by
   call index with no check that the prompt matches; Claude's runtime reruns from the
   first differing prompt (https://code.claude.com/docs/en/workflows#resume-after-a-pause).
 - **Dependencies:** U2 (journal epochs live there).
@@ -79,7 +79,7 @@ picked up. Application code is out of scope for this PR.
   the cost of cache files holding results between runs.
 
 ### U4. Script contract parity with Claude's native workflows
-- **Status:** planned. Evidence: Claude scripts end with `return <value>` and read
+- **Status:** done. Evidence: Claude scripts end with `return <value>` and read
   `args` as structured data; agentflow's `fn(...)` result is discarded in `runScript`
   and `args` is always a string array. Claude also supports per-agent `stallMs`.
   `workflows/deep-research.mjs` calls `process.exit(2)` on bad input, which Claude's
@@ -116,7 +116,7 @@ picked up. Application code is out of scope for this PR.
 ## Next
 
 ### U6. Determinism enforced at runtime, not by regex
-- **Status:** planned. Evidence: `lintDeterminism` in `runtime.mjs` is a regex over
+- **Status:** done. Evidence: `lintDeterminism` in `runtime.mjs` is a regex over
   source text and only runs with `--strict`; Claude and Temporal enforce at runtime.
 - **Dependencies:** U4 (shares the script sandbox).
 - **Verification:** a script calling `Date.now()` fails with a clear error under
@@ -155,7 +155,7 @@ picked up. Application code is out of scope for this PR.
   already in the payload; skip the rest and say so.
 
 ### U9. Workflow library from the documented patterns
-- **Status:** planned. Evidence: `workflows/` has `deep-research` and `compound-loop`;
+- **Status:** done. Evidence: `workflows/` has `deep-research`, `compound-loop`, `audit` and `migrate`;
   Claude's docs list audit-per-file, fix-until-check-passes, parallel migration in
   worktrees, PR review with merged summary, and find-until-no-new-results.
 - **Dependencies:** U2 (`worktree: 'auto'`), U4.

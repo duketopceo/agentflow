@@ -125,10 +125,14 @@ Real harness, cheap model (see `docs/smoke-matrix.md` for tested combinations):
 bin/agentflow run workflows/deep-research.mjs --harness devin -- "your question"
 bin/agentflow run workflows/deep-research.mjs --harness openrouter --cache -- "your question"   # needs OPENROUTER_API_KEY
 bin/agentflow run my-workflow.mjs --harness claude --via ori -- args   # claude workers billed through OpenRouter
+
+# workflow library: per-file audit or migration in parallel git worktrees
+bin/agentflow run workflows/audit.mjs --harness devin -- "\\.test\.mjs$" "check for stale mocks"
+bin/agentflow run workflows/migrate.mjs --harness devin -- "\\.test\.mjs$" "convert to node --test"
 ```
 
 A workflow script has top-level `await` and these globals: `agent`, `parallel`,
-`pipeline`, `phase`, `log`, `args`.
+`pipeline`, `phase`, `log`, `args`, `cwd`.
 
 ```js
 export const meta = { name: "audit", description: "review every file", phases: ["fan-out"] };
@@ -166,12 +170,12 @@ flowchart LR
   parses output into `{text, json}`. Sessions, tools and context are not shared;
   workers share only the filesystem.
 - **Journal:** each settled call is one line in `.agentflow/runs/<run-id>.jsonl`.
-  `--resume` replays settled calls by call order, so keep `agent()` call order
-  stable. `--cache` memoises by content (prompt, model, schema, ...) instead.
+  `--resume` replays settled calls by **content fingerprint** (prompt, model,
+  schema, worktree, cwd, permission, via, reasoning effort), re-executing only
+  calls whose spec changed or never finished.
 - **Limits you should know:** no sandbox beyond what each CLI enforces, no
   usage/cost numbers in the journal, schema output is parsed, validated against
-  a JSON Schema subset, and repair-retried up to 5 times by default, and
-  `--resume` replays by content fingerprint.
+  a JSON Schema subset, and repair-retried up to 5 times by default.
 
 ## Ops
 

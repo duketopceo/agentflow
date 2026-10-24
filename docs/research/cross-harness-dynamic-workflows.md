@@ -102,12 +102,12 @@ harness — the shared `skills/` + `workflows/` content is identical.
 
 | Claude capability | agentflow status |
 |---|---|
-| In-process pooled executor, background task + task id | Subprocess per `agent()` (seconds startup); foreground run, Ctrl-C -> resumable journal. `--detach` mode is an open follow-up. |
+| In-process pooled executor, background task + task id | Subprocess per `agent()` (seconds startup); foreground run, Ctrl-C -> resumable journal. `--detach` shipped; `status`/`stop`/`clean` keep it observable. |
 | Determinism guard (reject `Date.now`/`Math.random`/`crypto.randomUUID` in scripts) | Enforced at runtime by default — `Date`, `Math` and `crypto` are shadowed; `--allow-nondeterminism` opts out. Advisory: scripts can still reach `globalThis.Date`. |
 | `meta.phases` required | Accepted and documented; not enforced. |
 | Per-agent worktree | `worktree` spec field exists; honored by codex (`--worktree`); devin `-p` has no flag — local CLI gap, documented. |
 | Per-agent cost/token reporting | Not surfaced — harness output formats vary. Follow-up. |
-| 16-concurrency / 1000-cap | Pool is unbounded by count (default 8); no run cap. Follow-up: `--max-agents`. |
+| 16-concurrency / 1000-cap | `--max-agents <n>` shipped; defaults to 1000. |
 | `/deep-research` built-in | `workflows/deep-research.mjs` + `commands/deep-research.md` shipped. |
 
 ## 5. Open questions
@@ -119,9 +119,9 @@ harness — the shared `skills/` + `workflows/` content is identical.
   `pipeline()` stages), consider `requiredPlugins` on the devin manifest.
 - **Codex manifest schema**: `.codex-plugin/plugin.json` mirrors CE's
   convention; verify against codex's marketplace docs on first real install.
-- **Determinism lint**: Claude's guard exists for replay fidelity — our resume
-  already depends on stable call order, so a static check (`Date.now`,
-  `Math.random`, unsorted `readdir`) would catch real resume bugs.
+- **Determinism guard**: shipped as runtime shim enforcement (`Date`, `Math`,
+  `crypto` throw on nondeterministic calls by default; `--allow-nondeterminism`
+  opts out). The old opt-in regex lint was removed.
 
 ## 6. Naming
 

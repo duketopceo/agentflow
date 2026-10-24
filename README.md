@@ -169,9 +169,9 @@ flowchart LR
   `--resume` replays settled calls by call order, so keep `agent()` call order
   stable. `--cache` memoises by content (prompt, model, schema, ...) instead.
 - **Limits you should know:** no sandbox beyond what each CLI enforces, no
-  usage/cost numbers in the journal, schema output is validated by prompt and
-  extraction only (native on codex), and `--resume` does not yet check that a
-  prompt is unchanged (ROADMAP U3).
+  usage/cost numbers in the journal, schema output is parsed, validated against
+  a JSON Schema subset, and repair-retried up to 5 times by default, and
+  `--resume` replays by content fingerprint.
 
 ## Ops
 

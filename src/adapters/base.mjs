@@ -80,6 +80,109 @@ function balancedEnd(t, start) {
   return -1;
 }
 
+// Minimal JSON-Schema validator for the subset agentflow actually uses.
+// Returns null when valid, a short error string otherwise.
+export function validateJson(schema, value, path = '') {
+  if (schema == null) return null;
+
+  if (Array.isArray(schema.type)) {
+    if (!schema.type.some((t) => typeMatches(t, value))) return `${path || 'value'} is not one of [${schema.type.join(', ')}]`;
+  } else if (schema.type && !typeMatches(schema.type, value)) {
+    return `${path || 'value'} is not ${schema.type}`;
+  }
+
+  if (schema.const !== undefined && !deepEqual(schema.const, value)) {
+    return `${path || 'value'} does not equal ${JSON.stringify(schema.const)}`;
+  }
+  if (schema.enum && !schema.enum.some((v) => deepEqual(v, value))) {
+    return `${path || 'value'} is not one of ${JSON.stringify(schema.enum)}`;
+  }
+
+  if (value == null) return null;
+
+  if (typeof value === 'string') {
+    if (schema.minLength != null && value.length < schema.minLength) return `${path} shorter than ${schema.minLength}`;
+    if (schema.maxLength != null && value.length > schema.maxLength) return `${path} longer than ${schema.maxLength}`;
+    if (schema.pattern && !new RegExp(schema.pattern).test(value)) return `${path} does not match pattern ${schema.pattern}`;
+  }
+
+  if (typeof value === 'number' && !Number.isNaN(value)) {
+    if (schema.minimum != null && value < schema.minimum) return `${path} below minimum ${schema.minimum}`;
+    if (schema.maximum != null && value > schema.maximum) return `${path} above maximum ${schema.maximum}`;
+    if (schema.exclusiveMinimum != null && value <= schema.exclusiveMinimum) return `${path} not above ${schema.exclusiveMinimum}`;
+    if (schema.exclusiveMaximum != null && value >= schema.exclusiveMaximum) return `${path} below ${schema.exclusiveMaximum}`;
+    if (schema.multipleOf != null && value % schema.multipleOf !== 0) return `${path} not a multiple of ${schema.multipleOf}`;
+  }
+
+  if (Array.isArray(value)) {
+    if (schema.minItems != null && value.length < schema.minItems) return `${path} has fewer than ${schema.minItems} items`;
+    if (schema.maxItems != null && value.length > schema.maxItems) return `${path} has more than ${schema.maxItems} items`;
+    if (schema.uniqueItems && new Set(value.map(jsonKey)).size !== value.length) return `${path} has duplicate items`;
+    if (schema.items) for (let i = 0; i < value.length; i++) {
+      const err = validateJson(schema.items, value[i], `${path}[${i}]`);
+      if (err) return err;
+    }
+    if (schema.prefixItems) for (let i = 0; i < Math.min(schema.prefixItems.length, value.length); i++) {
+      const err = validateJson(schema.prefixItems[i], value[i], `${path}[${i}]`);
+      if (err) return err;
+    }
+  }
+
+  if (isPlainObject(value)) {
+    const props = schema.properties ?? {};
+    if (schema.required) for (const k of schema.required) {
+      if (!(k in value)) return `${path || 'object'} is missing required property '${k}'`;
+    }
+    const additional = schema.additionalProperties;
+    for (const [k, v] of Object.entries(value)) {
+      if (k in props) {
+        const err = validateJson(props[k], v, `${path}.${k}`);
+        if (err) return err;
+      } else if (additional === false) {
+        return `${path || 'object'} has unexpected property '${k}'`;
+      } else if (typeof additional === 'object' && additional != null) {
+        const err = validateJson(additional, v, `${path}.${k}`);
+        if (err) return err;
+      }
+    }
+  }
+
+  return null;
+}
+
+function typeMatches(t, v) {
+  switch (t) {
+    case 'object': return isPlainObject(v);
+    case 'array': return Array.isArray(v);
+    case 'string': return typeof v === 'string';
+    case 'number': return typeof v === 'number' && !Number.isNaN(v);
+    case 'integer': return Number.isInteger(v);
+    case 'boolean': return typeof v === 'boolean';
+    case 'null': return v === null;
+    default: return false;
+  }
+}
+
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date) && !(v instanceof RegExp);
+}
+
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) if (!Object.hasOwn(b, k) || !deepEqual(a[k], b[k])) return false;
+  return true;
+}
+
+function jsonKey(v) {
+  try { return JSON.stringify(v); } catch { return String(v); }
+}
+
 // Prompt-level schema enforcement for adapters without a native flag.
 export function withSchemaPrompt(spec) {
   if (!spec.schema) return spec;

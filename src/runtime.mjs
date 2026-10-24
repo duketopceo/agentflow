@@ -6,8 +6,9 @@ import { createHash } from 'node:crypto';
 import { Pool } from './pool.mjs';
 import { Journal } from './journal.mjs';
 import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
+import { validateJson } from './adapters/base.mjs';
 
-const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries', 'fetchImpl']);
+const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries', 'schemaRetries', 'fetchImpl']);
 const DEFAULT_GRACE_MS = 8000;
 
 // Replay fingerprint — sha over the spec fields that determine what a call
@@ -141,6 +142,7 @@ export async function runScript(opts) {
     cache = false,
     maxAgents = 1000,
     retries = 0,
+    schemaRetries = 4,
     batchPollMs = 15_000,
     batchTimeoutMs = 2 * 3600_000,
     fetchImpl = undefined,
@@ -281,6 +283,27 @@ export async function runScript(opts) {
             s = null; // retry: clear the failed result, re-enter the loop
           }
         }
+
+        // Schema validation + repair retry. A schema result must parse and pass
+        // the subset validator; if not, re-prompt with the error up to
+        // schemaRetries additional attempts.
+        if (s?.ok && spec.schema) {
+          const maxSchemaAttempts = 1 + Math.max(0, Math.floor(spec.schemaRetries ?? schemaRetries));
+          for (let attempt = 1; s?.ok && attempt <= maxSchemaAttempts; attempt++) {
+            const why = s.result.json == null
+              ? 'could not parse required JSON'
+              : validateJson(spec.schema, s.result.json);
+            if (why == null) break;
+            if (attempt === maxSchemaAttempts) {
+              s = { ok: false, error: { message: `schema: ${why}`, stderrTail: String(s.result.text ?? '').slice(-500), code: 0, timedOut: false, permissionDenied: false } };
+              break;
+            }
+            logLine(`${spec.label} schema retry ${attempt}/${maxSchemaAttempts - 1} (${why.slice(0, 120)})`);
+            const repair = `${spec.prompt}\n\nYour previous response did not match the required JSON schema: ${why}\nRaw response was: ${String(s.result.text ?? '').slice(0, 1000)}\nRespond with only a JSON object matching the schema, no prose.`;
+            s = await adapter.spawnAgent({ ...spec, prompt: repair, signal: abort.signal, cwd: spec.cwd ?? cwd });
+          }
+        }
+
         if (abort.signal.aborted && !s?.ok) return { cancelled: true };
         const secs = ((Date.now() - started) / 1000).toFixed(1);
         if (s.ok) {

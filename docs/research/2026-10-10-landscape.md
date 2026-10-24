@@ -93,8 +93,8 @@ GitHub API; it may have been renamed) and `docker-agent` PR 2796 from the
   cost ~$0.003 for a 12-call run.
 - **Claude's script contract, reimplemented.** Scripts use the same globals
   and `meta` literal as Claude's native workflows, so a script is a candidate
-  to run in both places. This is true for the globals but not yet for `return`
-  values, structured `args`, or `stallMs` (see ROADMAP U4).
+  to run in both places. This is true for the globals, `return` values, and
+  structured `args`; `stallMs` is not yet supported (see ROADMAP U4).
 - **Small enough to read:** about 1,100 lines of runtime and adapters, one
   runtime dependency (`@opencode-ai/plugin`, used only by the opencode plugin).
 - **Honest provenance:** a smoke matrix, a solutions folder with invariants,
@@ -107,12 +107,12 @@ the roadmap.
 
 ## 5. Corrections to earlier docs
 
-- `cross-harness-dynamic-workflows.md` §4 lists `--detach`, `--max-agents` and
-  `--strict` as open. They shipped (v0.2, PR #6). The opencode native plugin
-  (`.opencode/plugins/agentflow.ts`) also exists, so §5's first open question
-  is closed.
+- `cross-harness-dynamic-workflows.md` §4 lists `--detach` and `--max-agents`
+  as open; both shipped. `--strict` was replaced by runtime shim enforcement
+  (U6). The opencode native plugin (`.opencode/plugins/agentflow.ts`) also
+  exists, so §5's first open question is closed.
 - PR #7's M7 plan assumes the repo is private. `gh api repos/duketopceo/agentflow`
   reports `visibility: public` today, so that gate has already been passed.
-- Claude's runtime now makes `Date.now`, `Math.random` and no-argument
-  `new Date()` throw inside scripts, and ships a `/workflow-authoring` skill.
-  Both are worth mirroring.
+- Claude's runtime makes `Date.now`, `Math.random` and no-argument
+  `new Date()` throw inside scripts. agentflow now does the same by default
+  with `Date`, `Math` and `crypto` shims; `--allow-nondeterminism` opts out.

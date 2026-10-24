@@ -33,6 +33,7 @@ const RealCrypto = globalThis.crypto ?? {};
 // the common nondeterministic calls; --allow-nondeterminism passes the real ones.
 function makeShimDate() {
   function Date(...args) {
+    if (new.target === undefined) throw new Error('agentflow: direct Date() is nondeterministic; use --allow-nondeterminism to opt out');
     if (args.length === 0) throw new Error('agentflow: new Date() is nondeterministic; use --allow-nondeterminism to opt out');
     return new RealDate(...args);
   }
@@ -66,7 +67,7 @@ function makeDeterminismShims(allow) {
 // The object is a plain literal (same constraint as Claude's workflow meta);
 // it is removed from the evaluated source because `export` is illegal inside
 // the async wrapper the script runs in.
-function extractMeta(source, scriptName) {
+function extractMeta(source, scriptName, shims) {
   const m = /export\s+const\s+meta\s*=\s*/.exec(source);
   if (!m) return { meta: {}, source };
   const start = m.index + m[0].length;
@@ -85,7 +86,9 @@ function extractMeta(source, scriptName) {
   }
   if (depth !== 0) throw new SyntaxError(`${scriptName}: export const meta literal is unterminated`);
   const literal = source.slice(start, end);
-  const meta = new Function(`return (${literal})`)();
+  // Evaluate the meta literal with the same determinism shims the script body
+  // will run under, so a nondeterministic `Date.now()` in meta cannot slip past.
+  const meta = new Function('Date', 'Math', 'crypto', `return (${literal})`)(shims.Date, shims.Math, shims.crypto);
   // Remove the whole statement (plus trailing semicolon/newline if present).
   let tail = end;
   while (tail < source.length && /[\s;]/.test(source[tail])) tail++;
@@ -155,15 +158,16 @@ export async function runScript(opts) {
     return { code: 1 };
   }
 
+  const shims = makeDeterminismShims(allowNondeterminism);
+  const { Date: shimDate, Math: shimMath, crypto: shimCrypto } = shims;
+
   let meta, body;
   try {
-    ({ meta, source: body } = extractMeta(source, scriptName));
+    ({ meta, source: body } = extractMeta(source, scriptName, shims));
   } catch (e) {
     err(`agentflow: ${e.message}`);
     return { code: 1 };
   }
-
-  const { Date: shimDate, Math: shimMath, crypto: shimCrypto } = makeDeterminismShims(allowNondeterminism);
 
   // Resume: replay settled results by call index, re-execute the rest.
   const journalDir = Journal.dirFor(cwd);

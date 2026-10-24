@@ -56,6 +56,7 @@ changed since the run (logs `replay miss [i]` — stale results can't surface).
 | `phase` | `(name) => void` | labels stderr progress; journaled so `watch`/`tail` group lanes by phase |
 | `log` | `(msg) => void` | stderr; keep secrets out |
 | `args` | any | string array after `--` on the CLI, or parsed JSON via `--args-json` (e.g. `--args-json '{"task":"x","n":3}'` — Claude-parity structured args) |
+| `cwd` | string | the run's working directory (matches `--cwd` default) — use for `node:fs` paths in scripts |
 | `meta` | object | from `export const meta = {...}` |
 
 Script ends with `return <value>` → the value prints on **stdout** (progress

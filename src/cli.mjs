@@ -200,7 +200,15 @@ function initCmd(cwd) {
 const SELF = fileURLToPath(new URL('../bin/agentflow', import.meta.url));
 
 function detachRun(cwd, rawArgv) {
-  const runId = Journal.newRunId();
+  // --resume keeps the original journal id (the child resolves runId as
+  // `resumeId ?? --run-id ?? new`), so minting a fresh id here would point
+  // watch/status/stop at a journal that never exists and scatter the resumed
+  // run's log lines into a file nobody is told about.
+  const ri = rawArgv.indexOf('--resume');
+  const resumeId = ri !== -1 && typeof rawArgv[ri + 1] === 'string' && !rawArgv[ri + 1].startsWith('-')
+    ? rawArgv[ri + 1]
+    : null;
+  const runId = resumeId ?? Journal.newRunId();
   mkdirSync(Journal.dirFor(cwd), { recursive: true });
   const logFd = openSync(Journal.pathFor(cwd, runId).replace(/\.jsonl$/, '.log'), 'a');
   const childArgv = rawArgv.filter((a) => a !== '--detach' && a !== '--tmux');
@@ -210,7 +218,7 @@ function detachRun(cwd, rawArgv) {
   const args = [SELF, ...head, '--run-id', runId, '--cwd', cwd, ...tail];
   const child = spawn(process.execPath, args, { detached: true, stdio: ['ignore', logFd, logFd], cwd });
   child.unref();
-  process.stdout.write(`run ${runId} (detached, pid ${child.pid})\n  watch:  agentflow watch ${runId}\n  status: agentflow status ${runId}\n`);
+  process.stdout.write(`run ${runId}${resumeId ? ' (resumed)' : ''} (detached, pid ${child.pid})\n  watch:  agentflow watch ${runId}\n  status: agentflow status ${runId}\n`);
   if (rawArgv.includes('--tmux')) tmuxWatch(cwd, runId);
   return 0;
 }

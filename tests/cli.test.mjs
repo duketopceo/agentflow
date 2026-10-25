@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -66,6 +66,43 @@ test('--detach: parent returns run-id immediately; child completes and journals'
     // status on unknown run-id fails cleanly.
     const bad = await cli(['status', 'nope'], f.dir);
     assert.equal(bad.code, 2);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('--detach --resume: parent reports the RESUMED journal id, not a fresh one', async () => {
+  const f = fixture();
+  try {
+    f.write('w.mjs', SCRIPT);
+    const first = await cli(['run', 'w.mjs', '--harness', 'echo'], f.dir);
+    assert.equal(first.code, 0);
+    const runId = readdirSync(join(f.dir, '.agentflow', 'runs'))
+      .find((n) => n.endsWith('.jsonl'))?.replace(/\.jsonl$/, '');
+    assert.ok(runId, 'expected a journal after the first run');
+
+    const r = await cli(['run', 'w.mjs', '--harness', 'echo', '--detach', '--resume', runId], f.dir);
+    assert.equal(r.code, 0);
+    assert.ok(
+      r.out.includes(`run ${runId}`),
+      `detached resume must print the original run-id ${runId}: ${r.out}`,
+    );
+    // No phantom journal/log pair may appear under another id.
+    const names = readdirSync(join(f.dir, '.agentflow', 'runs'));
+    assert.ok(
+      names.every((n) => n.startsWith(runId)),
+      `stray run artifacts under a phantom id: ${names.join(', ')}`,
+    );
+
+    // The resumed child still reaches run-end under the original id.
+    let status;
+    for (let i = 0; i < 60; i++) {
+      status = await cli(['status', runId], f.dir);
+      if (status.code !== 2) break;
+      await new Promise((res) => setTimeout(res, 250));
+    }
+    assert.equal(status.code, 0);
+    assert.ok(status.out.includes('ended: ok'));
   } finally {
     f.cleanup();
   }

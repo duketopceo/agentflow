@@ -7,8 +7,9 @@ import { Pool } from './pool.mjs';
 import { Journal } from './journal.mjs';
 import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
 import { validateJson } from './adapters/base.mjs';
+import { getAdapter } from './adapters/index.mjs';
 
-const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries', 'schemaRetries', 'fetchImpl']);
+const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries', 'schemaRetries', 'fetchImpl', 'harness']);
 const DEFAULT_GRACE_MS = 8000;
 
 // Replay fingerprint — sha over the spec fields that determine what a call
@@ -258,7 +259,17 @@ export async function runScript(opts) {
       else logLine(`warning: unknown agent() option '${k}' ignored`);
     }
     if (via && !spec.via) spec.via = via;
-    const fp = fpOf(adapter.name, spec);
+    // Per-call harness override: `agent(prompt, { harness: 'devin' })` routes
+    // this one call through a different adapter while the run-level --harness
+    // stays the journal identity. The fingerprint records the call adapter's
+    // name, so a settled result replays only while the spec resolves to the
+    // same harness — mixed-harness fallback chains stay resume-safe.
+    const callAdapter = spec.harness ? getAdapter(spec.harness) : adapter;
+    if (!callAdapter) {
+      logLine(`${spec.label} -> null (unknown harness '${spec.harness}')`);
+      return null;
+    }
+    const fp = fpOf(callAdapter.name, spec);
 
     const rec = prior?.settled.get(i);
     if (replayable(rec, fp)) {
@@ -288,7 +299,7 @@ export async function runScript(opts) {
     const settled = await pool.run(async () => {
       if (abort.signal.aborted) return { cancelled: true };
       inFlight.add(spec);
-      journal.append({ type: 'in-flight', i, label: spec.label, model: spec.model ?? null, at: new Date().toISOString() });
+      journal.append({ type: 'in-flight', i, label: spec.label, model: spec.model ?? null, harness: spec.harness ?? null, at: new Date().toISOString() });
       try {
         // worktree:'auto' — runner-provisioned checkout, journaled. The
         // adapter never sees the literal (KTD3); 'true' still passes through
@@ -311,7 +322,7 @@ export async function runScript(opts) {
         // just burns another timeout window). Backoff: 1000ms * attempt.
         const maxAttempts = 1 + Math.max(0, Math.floor(spec.retries ?? retries));
         for (let attempt = 1; s === null && attempt <= maxAttempts; attempt++) {
-          s = await adapter.spawnAgent({ ...spec, signal: abort.signal, cwd: spec.cwd ?? cwd });
+          s = await callAdapter.spawnAgent({ ...spec, signal: abort.signal, cwd: spec.cwd ?? cwd });
           if (s?.ok || abort.signal.aborted) break;
           const e = s?.error ?? {};
           if (e.permissionDenied || e.timedOut) break;
@@ -338,23 +349,23 @@ export async function runScript(opts) {
             }
             logLine(`${spec.label} schema retry ${attempt}/${maxSchemaAttempts - 1} (${why.slice(0, 120)})`);
             const repair = `${spec.prompt}\n\nYour previous response did not match the required JSON schema: ${why}\nRaw response was: ${String(s.result.text ?? '').slice(0, 1000)}\nRespond with only a JSON object matching the schema, no prose.`;
-            s = await adapter.spawnAgent({ ...spec, prompt: repair, signal: abort.signal, cwd: spec.cwd ?? cwd });
+            s = await callAdapter.spawnAgent({ ...spec, prompt: repair, signal: abort.signal, cwd: spec.cwd ?? cwd });
           }
         }
 
         if (abort.signal.aborted && !s?.ok) return { cancelled: true };
         const secs = ((Date.now() - started) / 1000).toFixed(1);
         if (s.ok) {
-          journal.append({ type: 'agent', i, label: spec.label, ok: true, result: s.result, model: spec.model ?? null, fp, elapsed: secs, at: new Date().toISOString() });
+          journal.append({ type: 'agent', i, label: spec.label, ok: true, result: s.result, model: spec.model ?? null, harness: spec.harness ?? null, fp, elapsed: secs, at: new Date().toISOString() });
           if (cKey) cacheWrite(cwd, cKey, s.result);
           return { ok: true, result: s.result, elapsed: secs };
         }
-        journal.append({ type: 'agent', i, label: spec.label, ok: false, error: s.error, model: spec.model ?? null, fp, elapsed: secs, at: new Date().toISOString() });
+        journal.append({ type: 'agent', i, label: spec.label, ok: false, error: s.error, model: spec.model ?? null, harness: spec.harness ?? null, fp, elapsed: secs, at: new Date().toISOString() });
         return { ok: false, error: s.error, elapsed: secs };
       } catch (e) {
         const secs = ((Date.now() - started) / 1000).toFixed(1);
         const error = { message: String(e?.message ?? e), permissionDenied: false };
-        journal.append({ type: 'agent', i, label: spec.label, ok: false, error, model: spec.model ?? null, fp, elapsed: secs, at: new Date().toISOString() });
+        journal.append({ type: 'agent', i, label: spec.label, ok: false, error, model: spec.model ?? null, harness: spec.harness ?? null, fp, elapsed: secs, at: new Date().toISOString() });
         return { ok: false, error, elapsed: secs };
       } finally {
         inFlight.delete(spec);

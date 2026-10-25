@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { runScript, fpOf, reapStrays } from '../src/runtime.mjs';
 import { Journal } from '../src/journal.mjs';
 import echo, { calls } from '../src/adapters/echo.mjs';
+import { adapters } from '../src/adapters/index.mjs';
 import { spawnAgent } from '../src/adapters/base.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -248,6 +249,38 @@ log('RESULT:' + JSON.stringify(a.text));`);
     assert.match(f.lastResult(), /echo\[a0\]: do 0/);
     assert.ok(f.lines.some((l) => l.includes("journal is a 'devin' run")));
     assert.ok(f.lines.some((l) => l.includes('replay miss [0]')));
+  } finally { f.cleanup(); }
+});
+
+test('per-call harness opt routes the call through that adapter', async () => {
+  const f = fixture();
+  const echo2 = { ...echo, name: 'echo2' };
+  adapters.echo2 = echo2;
+  try {
+    f.writeScript(`const a = await agent('do 0', {label:'a0', harness:'echo2'});
+const b = await agent('do 1', {label:'a1'});
+log('RESULT:' + JSON.stringify([a.text, b.text]));`);
+    const res = await f.run();
+    assert.equal(res.code, 0);
+    assert.equal(calls.length, 2);
+    const loaded = Journal.load(Journal.pathFor(f.dir, res.runId));
+    const recs = [...loaded.settled.values()];
+    assert.equal(recs[0].harness, 'echo2');   // journaled per-call override
+    assert.equal(recs[0].fp, fpOf('echo2', { prompt: 'do 0', label: 'a0', harness: 'echo2' }));
+    assert.equal(recs[1].harness, null);      // run-level harness untouched
+  } finally { delete adapters.echo2; f.cleanup(); }
+});
+
+test('per-call harness with an unknown name settles null, not a crash', async () => {
+  const f = fixture();
+  try {
+    f.writeScript(`const a = await agent('do 0', {label:'a0', harness:'nope-harness'});
+log('RESULT:' + JSON.stringify(a));`);
+    const res = await f.run();
+    assert.equal(res.code, 0);
+    assert.equal(calls.length, 0);            // never reached an adapter
+    assert.equal(f.lastResult(), null);
+    assert.ok(f.lines.some((l) => l.includes("unknown harness 'nope-harness'")));
   } finally { f.cleanup(); }
 });
 

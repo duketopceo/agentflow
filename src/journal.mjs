@@ -48,7 +48,7 @@ export class Journal {
   }
 
   static load(path) {
-    const meta = { settled: new Map(), ended: null, runStart: null, worktrees: [], batches: [], inFlight: new Map(), batchPolls: [], phases: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, steps: 0, calls: 0 } };
+    const meta = { settled: new Map(), ended: null, runStart: null, worktrees: [], batches: [], inFlight: new Map(), spawns: new Map(), batchPolls: [], phases: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, steps: 0, calls: 0 } };
     if (!existsSync(path)) return meta;
     for (const line of readFileSync(path, 'utf8').split('\n')) {
       if (!line.trim()) continue;
@@ -75,10 +75,16 @@ export class Journal {
       else if (rec.type === 'batch') meta.batches.push(rec);
       // Progress records — watch/status render these; replay ignores them.
       else if (rec.type === 'in-flight') meta.inFlight.set(rec.i, rec);
+      // 'spawn' records the harness child's process-group id (pgid == pid —
+      // adapters spawn detached + setpgid). --resume uses it to reap a stray
+      // group whose call never settled: without it the group keeps mutating
+      // the checkout while the resumed run re-issues the same unit.
+      else if (rec.type === 'spawn') meta.spawns.set(rec.i, rec);
       else if (rec.type === 'batch-poll') meta.batchPolls.push(rec);
       else if (rec.type === 'phase') meta.phases.push(rec);
     }
     for (const i of meta.inFlight.keys()) if (meta.settled.has(i)) meta.inFlight.delete(i);
+    for (const i of meta.spawns.keys()) if (meta.settled.has(i)) meta.spawns.delete(i);
     return meta;
   }
 

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runScript, fpOf } from '../src/runtime.mjs';
+import { runScript, fpOf, reapStrays } from '../src/runtime.mjs';
 import { Journal } from '../src/journal.mjs';
 import echo, { calls } from '../src/adapters/echo.mjs';
 import { spawnAgent } from '../src/adapters/base.mjs';
@@ -736,4 +736,52 @@ test('retries: permissionDenied and timeout are never retried', async () => {
     delete process.env.AGENTFLOW_ECHO_SLOW;
     f.cleanup();
   }
+});
+
+test('reapStrays kills a live journaled process group, leaves dead and foreign ones', async () => {
+  const sleeper = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  try { process.setpgid(sleeper.pid, sleeper.pid); } catch {}
+  const lines = [];
+  const tell = (s) => lines.push(s);
+  try {
+    // Live group, matching binary name -> killed.
+    reapStrays(new Map([[0, { i: 0, label: 'U2', pid: sleeper.pid, bin: 'sleep' }]]), tell);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.throws(() => process.kill(sleeper.pid, 0), /ESRCH/);
+    assert.ok(lines.some((l) => l.includes('reaped stray [0] U2')));
+
+    // Already-dead pgid -> skipped silently.
+    lines.length = 0;
+    reapStrays(new Map([[1, { i: 1, label: 'dead', pid: sleeper.pid, bin: 'sleep' }]]), tell);
+    assert.equal(lines.length, 0);
+  } finally {
+    try { process.kill(-sleeper.pid, 'SIGKILL'); } catch {}
+    try { sleeper.kill('SIGKILL'); } catch {}
+  }
+
+  // argv0 mismatch (pid reuse guard) -> left alone with a warning.
+  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  try { process.setpgid(other.pid, other.pid); } catch {}
+  try {
+    lines.length = 0;
+    reapStrays(new Map([[2, { i: 2, label: 'foreign', pid: other.pid, bin: 'opencode' }]]), tell);
+    assert.ok(lines.some((l) => l.includes('left alone')));
+    assert.doesNotThrow(() => process.kill(other.pid, 0)); // still alive
+  } finally {
+    try { process.kill(-other.pid, 'SIGKILL'); } catch {}
+    try { other.kill('SIGKILL'); } catch {}
+  }
+});
+
+test('spawn records are journaled for real harness spawns only', async () => {
+  const f = fixture();
+  try {
+    // echo is a non-process adapter: no spawn records may appear.
+    f.writeScript(`await agent('x', {label:'a'});`);
+    const res = await f.run();
+    assert.equal(res.code, 0);
+    const meta = Journal.load(Journal.pathFor(f.dir, res.runId));
+    assert.equal(meta.spawns.size, 0);
+    assert.equal(meta.settled.get(0).ok, true);
+  } finally { f.cleanup(); }
 });

@@ -23,6 +23,33 @@ export const fpOf = (harness, spec) => createHash('sha256').update(JSON.stringif
   v: spec.via ?? null, re: spec.reasoningEffort ?? null,
 })).digest('hex').slice(0, 16);
 const replayable = (rec, fp) => rec != null && (rec.fp == null || rec.fp === fp);
+
+// Reap stray harness groups a dead parent left running. A 'spawn' record whose
+// call never settled is a mid-execution orphan: if the process group is still
+// alive it keeps mutating the checkout while the resumed run re-issues the
+// same unit. The journaled pid doubles as the group id (adapters spawn
+// detached + setpgid). /proc is the only portable liveness+identity check we
+// have: no /proc entry means the group is already gone; an argv[0] that does
+// not name the recorded binary means pid reuse — leave it alone either way.
+export function reapStrays(spawns, tell = () => {}) {
+  for (const [i, rec] of spawns) {
+    const pgid = rec?.pid;
+    if (typeof pgid !== 'number' || pgid <= 1) continue;
+    let argv0;
+    try { argv0 = readFileSync(`/proc/${pgid}/cmdline`, 'utf8').split('\0')[0]; }
+    catch { continue; }
+    if (!argv0.includes(rec.bin ?? '')) {
+      tell(`stray check [${i}] ${rec.label}: pgid ${pgid} alive but argv0 is '${argv0}' not '${rec.bin}' — left alone`);
+      continue;
+    }
+    try { process.kill(-pgid, 'SIGKILL'); }
+    catch {
+      try { process.kill(pgid, 'SIGKILL'); }
+      catch (e) { tell(`stray [${i}] ${rec.label}: kill failed: ${e.message}`); continue; }
+    }
+    tell(`reaped stray [${i}] ${rec.label} (pgid ${pgid} still running from a dead parent)`);
+  }
+}
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const RealDate = globalThis.Date;
 const RealMath = globalThis.Math;
@@ -215,6 +242,13 @@ export async function runScript(opts) {
   const elapsed = () => ((Date.now() - t0) / 1000).toFixed(1) + 's';
   const logLine = (s) => err(`[${elapsed()}]${phaseName ? ` [${phaseName}]` : ''} ${s}`);
 
+  // A prior epoch that died mid-call may have left its harness process group
+  // alive — adapters spawn detached + setpgid precisely so timeout/abort can
+  // kill the tree, which also detaches it from parent-death reaping. Journaled
+  // spawn records name the group; kill it before re-executing the same unit
+  // or two agents end up mutating the same checkout.
+  if (resumeId && prior.spawns.size) reapStrays(prior.spawns, logLine);
+
   async function agent(prompt, agentOpts = {}) {
     const i = callIndex++;
     if (i >= maxAgents) throw new Error(`agent-count cap exceeded (max ${maxAgents})`);
@@ -243,6 +277,10 @@ export async function runScript(opts) {
     }
 
     const started = Date.now();
+    // Report each spawned harness child so a dead parent can't leave a live
+    // process group mutating the checkout unseen (reaped on --resume).
+    spec.onSpawn = (pid, bin) =>
+      journal.append({ type: 'spawn', i, label: spec.label, pid, bin, at: new Date().toISOString() });
     // Journaling lives inside the task so inFlight.empty => durable record.
     // Returns {cancelled:true} when the call never genuinely ran: drained
     // queue, aborted spawn, or a failure caused by our own abort. Cancelled

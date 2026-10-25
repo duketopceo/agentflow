@@ -172,7 +172,13 @@ flowchart LR
 - **Journal:** each settled call is one line in `.agentflow/runs/<run-id>.jsonl`.
   `--resume` replays settled calls by **content fingerprint** (prompt, model,
   schema, worktree, cwd, permission, via, reasoning effort), re-executing only
-  calls whose spec changed or never finished.
+  calls whose spec changed or never finished. A settled *failure* replays as
+  `null` — enough for a fallback chain to rotate to the next model — and a
+  crashed call's dangling `in-flight` record is ignored, so crash recovery
+  never needs journal surgery. Strip a settled record only to force
+  re-execution of an unchanged spec. If the dead epoch's harness process is
+  still running, `--resume` kills its process group first (`spawn` records in
+  the journal carry the pgid).
 - **Limits you should know:** no sandbox beyond what each CLI enforces, no
   usage/cost numbers in the journal, schema output is parsed, validated against
   a JSON Schema subset, and repair-retried up to 5 times by default.

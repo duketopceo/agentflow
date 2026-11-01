@@ -1,0 +1,9 @@
+{
+  "name": "agentflow-policy-interception-eval",
+  "private": true,
+  "type": "module",
+  "description": "Scratch harness for the govern() policy-interception evaluation (not shipped).",
+  "dependencies": {
+    "@microsoft/agent-governance-sdk": "^5.0.0"
+  }
+}

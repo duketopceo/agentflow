@@ -202,6 +202,7 @@ checkout; `clean` reclaims them after the run ends.
 - `docs/smoke-matrix.md` — live per-adapter verification results (`scripts/smoke-harnesses.mjs` reproduces)
 - `docs/research/` — cross-harness landscape + orchestration economics; start with `2026-10-10-landscape.md`
 - `docs/publish-matrix.md` — per-harness distribution surfaces and publish paths
+- `docs/task-queue.md` — serializing expensive ops across parallel agents via `agent-task-queue`
 - `DESIGN.md` and `assets/brand/` — design direction and logo proposal
 
 ## Status

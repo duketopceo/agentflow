@@ -143,7 +143,11 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   if (cmd === 'doctor') {
-    const probes = await Promise.all(Object.entries(adapters).map(async ([name, adapter]) => [name, await adapter.probe()]));
+    const { probeTaskQueue } = await import('./taskqueue.mjs');
+    const [probes, tq] = await Promise.all([
+      Promise.all(Object.entries(adapters).map(async ([name, adapter]) => [name, await adapter.probe()])),
+      probeTaskQueue(),
+    ]);
     let anyFail = false;
     for (const [name, p] of probes) {
       const mark = p.ok ? 'ok  ' : 'FAIL';
@@ -151,6 +155,11 @@ export async function main(argv = process.argv.slice(2)) {
       process.stdout.write(`${mark} ${name.padEnd(9)} ${p.path ?? '(not found)'}\n`);
       for (const n of p.notes ?? []) process.stdout.write(`     ${' '.repeat(9)} ${n}\n`);
     }
+    // agent-task-queue is opt-in infrastructure, not a required adapter — its
+    // line is informational (`note`, never FAIL) so doctor's exit code is
+    // unchanged whether or not uvx is installed.
+    process.stdout.write(`note task-queue ${tq.available ? (tq.path ?? 'available') : '(not found)'}\n`);
+    for (const n of tq.notes ?? []) process.stdout.write(`     ${' '.repeat(9)} ${n}\n`);
     return anyFail ? 1 : 0;
   }
 

@@ -1,0 +1,37 @@
+# Scratch policy for the govern() evaluation harness.
+# Rich Policy document consumed by PolicyEngine.loadYaml().
+#
+# NOTE: the condition language supports ==, !=, numeric comparison,
+# `in` / `not in` list membership, boolean attributes, and and/or.
+# It has NO substring/regex/glob matching on values — predicates like
+# `destructive`, `host_allowed`, `outside_worktree` must be precomputed
+# by the wrapper before evaluation.
+apiVersion: agentmesh/v1
+name: agentflow-worker-tools
+scope: global
+default_action: deny
+rules:
+  - name: deny-destructive-shell
+    description: Destructive shell commands never run, approval cannot override
+    condition: "tool == 'shell' and destructive == true"
+    ruleAction: deny
+    priority: 100
+
+  - name: deny-unsanctioned-egress
+    description: Network calls to hosts outside the allowlist are denied
+    condition: "tool == 'net' and host_allowed == false"
+    ruleAction: deny
+    priority: 100
+
+  - name: approve-writes-outside-worktree
+    description: File writes outside the worker worktree require operator approval
+    condition: "tool == 'fs' and op == 'write' and outside_worktree == true"
+    ruleAction: require_approval
+    approvers: [operator]
+    priority: 50
+
+  - name: allow-worker-tools
+    description: Everything else on the wrapped tool surface executes
+    condition: "tool in ['shell', 'fs', 'net']"
+    ruleAction: allow
+    priority: 0

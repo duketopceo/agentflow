@@ -5,7 +5,7 @@ const STDERR_TAIL = 8192;
 
 // spawn a CLI, capture stdout/stderr, enforce timeout and abort.
 // Never throws: failures return a structured result for the caller to classify.
-export function spawnProcess(argv, { cwd, timeout, signal, env } = {}) {
+export function spawnProcess(argv, { cwd, timeout, signal, env, onSpawn } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
@@ -17,6 +17,13 @@ export function spawnProcess(argv, { cwd, timeout, signal, env } = {}) {
       });
       child.on('spawn', () => {
         try { process.setpgid(child.pid, child.pid); } catch {}
+        // The child is a process-group leader (detached + setpgid) so timeout
+        // and abort can kill its whole tree — but that also means the group
+        // survives if WE die. Reporting the pgid lets a later --resume reap
+        // the stray before re-executing the same unit.
+        if (typeof onSpawn === 'function' && child.pid != null) {
+          try { onSpawn(child.pid, argv[0]); } catch {}
+        }
       });
     } catch (e) {
       return resolve({ spawnError: e.message });
@@ -241,7 +248,7 @@ export async function spawnAgent(adapter, spec) {
     return { ok: false, error: { message: wrapped.error, stderrTail: '', code: null, timedOut: false, permissionDenied: false } };
   }
   const argv = wrapped.argv;
-  const r = await spawnProcess(argv, { cwd: spec.cwd, timeout: spec.timeout, signal: spec.signal, env: adapter.buildEnv?.(spec) });
+  const r = await spawnProcess(argv, { cwd: spec.cwd, timeout: spec.timeout, signal: spec.signal, env: adapter.buildEnv?.(spec), onSpawn: spec.onSpawn });
   if (r.spawnError) return { ok: false, error: classifyFailure(r, adapter.permissionDeniedPatterns) };
   if (r.code === 0 && !r.timedOut) {
     const result = adapter.parse(r, spec);

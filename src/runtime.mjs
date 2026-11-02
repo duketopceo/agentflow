@@ -7,8 +7,9 @@ import { Pool } from './pool.mjs';
 import { Journal } from './journal.mjs';
 import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
 import { validateJson } from './adapters/base.mjs';
+import { getAdapter } from './adapters/index.mjs';
 
-const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries', 'schemaRetries', 'fetchImpl']);
+const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries', 'schemaRetries', 'fetchImpl', 'harness']);
 const DEFAULT_GRACE_MS = 8000;
 
 // Replay fingerprint — sha over the spec fields that determine what a call
@@ -23,6 +24,33 @@ export const fpOf = (harness, spec) => createHash('sha256').update(JSON.stringif
   v: spec.via ?? null, re: spec.reasoningEffort ?? null,
 })).digest('hex').slice(0, 16);
 const replayable = (rec, fp) => rec != null && (rec.fp == null || rec.fp === fp);
+
+// Reap stray harness groups a dead parent left running. A 'spawn' record whose
+// call never settled is a mid-execution orphan: if the process group is still
+// alive it keeps mutating the checkout while the resumed run re-issues the
+// same unit. The journaled pid doubles as the group id (adapters spawn
+// detached + setpgid). /proc is the only portable liveness+identity check we
+// have: no /proc entry means the group is already gone; an argv[0] that does
+// not name the recorded binary means pid reuse — leave it alone either way.
+export function reapStrays(spawns, tell = () => {}) {
+  for (const [i, rec] of spawns) {
+    const pgid = rec?.pid;
+    if (typeof pgid !== 'number' || pgid <= 1) continue;
+    let argv0;
+    try { argv0 = readFileSync(`/proc/${pgid}/cmdline`, 'utf8').split('\0')[0]; }
+    catch { continue; }
+    if (!argv0.includes(rec.bin ?? '')) {
+      tell(`stray check [${i}] ${rec.label}: pgid ${pgid} alive but argv0 is '${argv0}' not '${rec.bin}' — left alone`);
+      continue;
+    }
+    try { process.kill(-pgid, 'SIGKILL'); }
+    catch {
+      try { process.kill(pgid, 'SIGKILL'); }
+      catch (e) { tell(`stray [${i}] ${rec.label}: kill failed: ${e.message}`); continue; }
+    }
+    tell(`reaped stray [${i}] ${rec.label} (pgid ${pgid} still running from a dead parent)`);
+  }
+}
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const RealDate = globalThis.Date;
 const RealMath = globalThis.Math;
@@ -215,6 +243,13 @@ export async function runScript(opts) {
   const elapsed = () => ((Date.now() - t0) / 1000).toFixed(1) + 's';
   const logLine = (s) => err(`[${elapsed()}]${phaseName ? ` [${phaseName}]` : ''} ${s}`);
 
+  // A prior epoch that died mid-call may have left its harness process group
+  // alive — adapters spawn detached + setpgid precisely so timeout/abort can
+  // kill the tree, which also detaches it from parent-death reaping. Journaled
+  // spawn records name the group; kill it before re-executing the same unit
+  // or two agents end up mutating the same checkout.
+  if (resumeId && prior.spawns.size) reapStrays(prior.spawns, logLine);
+
   async function agent(prompt, agentOpts = {}) {
     const i = callIndex++;
     if (i >= maxAgents) throw new Error(`agent-count cap exceeded (max ${maxAgents})`);
@@ -224,7 +259,17 @@ export async function runScript(opts) {
       else logLine(`warning: unknown agent() option '${k}' ignored`);
     }
     if (via && !spec.via) spec.via = via;
-    const fp = fpOf(adapter.name, spec);
+    // Per-call harness override: `agent(prompt, { harness: 'devin' })` routes
+    // this one call through a different adapter while the run-level --harness
+    // stays the journal identity. The fingerprint records the call adapter's
+    // name, so a settled result replays only while the spec resolves to the
+    // same harness — mixed-harness fallback chains stay resume-safe.
+    const callAdapter = spec.harness ? getAdapter(spec.harness) : adapter;
+    if (!callAdapter) {
+      logLine(`${spec.label} -> null (unknown harness '${spec.harness}')`);
+      return null;
+    }
+    const fp = fpOf(callAdapter.name, spec);
 
     const rec = prior?.settled.get(i);
     if (replayable(rec, fp)) {
@@ -243,6 +288,10 @@ export async function runScript(opts) {
     }
 
     const started = Date.now();
+    // Report each spawned harness child so a dead parent can't leave a live
+    // process group mutating the checkout unseen (reaped on --resume).
+    spec.onSpawn = (pid, bin) =>
+      journal.append({ type: 'spawn', i, label: spec.label, pid, bin, at: new Date().toISOString() });
     // Journaling lives inside the task so inFlight.empty => durable record.
     // Returns {cancelled:true} when the call never genuinely ran: drained
     // queue, aborted spawn, or a failure caused by our own abort. Cancelled
@@ -250,7 +299,7 @@ export async function runScript(opts) {
     const settled = await pool.run(async () => {
       if (abort.signal.aborted) return { cancelled: true };
       inFlight.add(spec);
-      journal.append({ type: 'in-flight', i, label: spec.label, model: spec.model ?? null, at: new Date().toISOString() });
+      journal.append({ type: 'in-flight', i, label: spec.label, model: spec.model ?? null, harness: spec.harness ?? null, at: new Date().toISOString() });
       try {
         // worktree:'auto' — runner-provisioned checkout, journaled. The
         // adapter never sees the literal (KTD3); 'true' still passes through
@@ -273,7 +322,7 @@ export async function runScript(opts) {
         // just burns another timeout window). Backoff: 1000ms * attempt.
         const maxAttempts = 1 + Math.max(0, Math.floor(spec.retries ?? retries));
         for (let attempt = 1; s === null && attempt <= maxAttempts; attempt++) {
-          s = await adapter.spawnAgent({ ...spec, signal: abort.signal, cwd: spec.cwd ?? cwd });
+          s = await callAdapter.spawnAgent({ ...spec, signal: abort.signal, cwd: spec.cwd ?? cwd });
           if (s?.ok || abort.signal.aborted) break;
           const e = s?.error ?? {};
           if (e.permissionDenied || e.timedOut) break;
@@ -300,23 +349,23 @@ export async function runScript(opts) {
             }
             logLine(`${spec.label} schema retry ${attempt}/${maxSchemaAttempts - 1} (${why.slice(0, 120)})`);
             const repair = `${spec.prompt}\n\nYour previous response did not match the required JSON schema: ${why}\nRaw response was: ${String(s.result.text ?? '').slice(0, 1000)}\nRespond with only a JSON object matching the schema, no prose.`;
-            s = await adapter.spawnAgent({ ...spec, prompt: repair, signal: abort.signal, cwd: spec.cwd ?? cwd });
+            s = await callAdapter.spawnAgent({ ...spec, prompt: repair, signal: abort.signal, cwd: spec.cwd ?? cwd });
           }
         }
 
         if (abort.signal.aborted && !s?.ok) return { cancelled: true };
         const secs = ((Date.now() - started) / 1000).toFixed(1);
         if (s.ok) {
-          journal.append({ type: 'agent', i, label: spec.label, ok: true, result: s.result, model: spec.model ?? null, fp, elapsed: secs, at: new Date().toISOString() });
+          journal.append({ type: 'agent', i, label: spec.label, ok: true, result: s.result, model: spec.model ?? null, harness: spec.harness ?? null, fp, elapsed: secs, at: new Date().toISOString() });
           if (cKey) cacheWrite(cwd, cKey, s.result);
           return { ok: true, result: s.result, elapsed: secs };
         }
-        journal.append({ type: 'agent', i, label: spec.label, ok: false, error: s.error, model: spec.model ?? null, fp, elapsed: secs, at: new Date().toISOString() });
+        journal.append({ type: 'agent', i, label: spec.label, ok: false, error: s.error, model: spec.model ?? null, harness: spec.harness ?? null, fp, elapsed: secs, at: new Date().toISOString() });
         return { ok: false, error: s.error, elapsed: secs };
       } catch (e) {
         const secs = ((Date.now() - started) / 1000).toFixed(1);
         const error = { message: String(e?.message ?? e), permissionDenied: false };
-        journal.append({ type: 'agent', i, label: spec.label, ok: false, error, model: spec.model ?? null, fp, elapsed: secs, at: new Date().toISOString() });
+        journal.append({ type: 'agent', i, label: spec.label, ok: false, error, model: spec.model ?? null, harness: spec.harness ?? null, fp, elapsed: secs, at: new Date().toISOString() });
         return { ok: false, error, elapsed: secs };
       } finally {
         inFlight.delete(spec);

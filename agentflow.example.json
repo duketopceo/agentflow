@@ -1,5 +1,6 @@
 {
   "harness": "devin",
+  "model": "sonnet",
   "concurrency": 8,
   "maxAgents": 1000,
   "cache": true,

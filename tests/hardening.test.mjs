@@ -98,7 +98,7 @@ test('runtime: a script that throws aborts its still-running agent calls', async
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('SIGINT twice: second Ctrl-C force-aborts instead of waiting out the grace window', async () => {
+test('SIGINT twice: second Ctrl-C force-aborts instead of waiting out the grace window', { skip: process.platform === 'win32' && 'needs POSIX signal delivery (SIGINT/SIGTERM)' }, async () => {
   const dir = tmp();
   try {
     writeFileSync(join(dir, 'w.mjs'), `log('boot'); await agent('x', {label:'a'});`);

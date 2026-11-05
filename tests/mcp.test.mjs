@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, delimiter } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +16,7 @@ const FAKEBIN = resolve(REPO, 'tests/fakebin');
 
 function mcpClient(extraEnv = {}) {
   const child = spawn(process.execPath, [BIN, 'mcp'], {
-    env: { ...process.env, PATH: `${FAKEBIN}:${process.env.PATH}`, ...extraEnv },
+    env: { ...process.env, PATH: `${FAKEBIN}${delimiter}${process.env.PATH}`, ...extraEnv },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   child.stderr.resume(); // keep the pipe drained; protocol lives on stdout

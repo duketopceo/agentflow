@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { delimiter } from 'node:path';
 
 export const FAKEBIN = fileURLToPath(new URL('./fakebin', import.meta.url));
 
@@ -10,7 +11,7 @@ export async function withFakebin(fn, env = {}) {
   const saved = { PATH: process.env.PATH };
   for (const k of Object.keys(env)) saved[k] = process.env[k];
   try {
-    process.env.PATH = `${FAKEBIN}:${saved.PATH}`;
+    process.env.PATH = `${FAKEBIN}${delimiter}${saved.PATH}`;
     Object.assign(process.env, env);
     return await fn();
   } finally {
@@ -22,3 +23,9 @@ export async function withFakebin(fn, env = {}) {
 }
 
 export const spec = (over = {}) => ({ prompt: 'review this file', label: 't', ...over });
+
+// Portable long-running child: [cmd, args] for child_process.spawn.
+export const sleepBin = process.platform === 'win32' ? 'node' : 'sleep';
+export const sleepCmd = (secs) => process.platform === 'win32'
+  ? [process.execPath, ['-e', `setTimeout(() => {}, ${secs * 1000})`]]
+  : ['sleep', [String(secs)]];

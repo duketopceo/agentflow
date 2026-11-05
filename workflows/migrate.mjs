@@ -42,7 +42,7 @@ const results = await parallel(
   files.map((f) => () =>
     agent(
       `Apply this migration to the file. Edit the file in place; explain what you changed.\n\nFile: ${f}\n\nMigration: ${task}`,
-      { label: `migrate:${f.split('/').pop().slice(0, 40)}`, worktree: 'auto' }
+      { label: `migrate:${f.split(/[\\/]/).pop().slice(0, 40)}`, worktree: 'auto' }
     )
   )
 );

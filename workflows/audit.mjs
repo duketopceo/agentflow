@@ -41,7 +41,7 @@ const findings = await parallel(
   files.map((f) => () =>
     agent(
       `Audit this file and report any issues concise and actionable.\n\nCriteria: ${criteria}\n\nFile: ${f}`,
-      { label: `audit:${f.split('/').pop().slice(0, 40)}` }
+      { label: `audit:${f.split(/[\\/]/).pop().slice(0, 40)}` }
     )
   )
 );

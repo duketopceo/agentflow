@@ -2,3 +2,6 @@ node_modules/
 .agentflow/
 *.log
 .DS_Store
+
+# codebase-memory-mcp local index cache
+.codebase-memory/

@@ -274,7 +274,7 @@ log('RESULT:' + JSON.stringify(r));`);
   } finally { f.cleanup(); }
 }));
 
-test('batch: SIGINT mid-poll leaves a pending record; resume re-polls without resubmitting', async () => {
+test('batch: SIGINT mid-poll leaves a pending record; resume re-polls without resubmitting', { skip: process.platform === 'win32' && 'needs POSIX signal delivery (SIGINT/SIGTERM)' }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'af-batch-sig-'));
   let server;
   try {

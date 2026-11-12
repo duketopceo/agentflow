@@ -8,6 +8,7 @@ import { Journal } from './journal.mjs';
 import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
 import { validateJson } from './adapters/base.mjs';
 import { getAdapter } from './adapters/index.mjs';
+import { killTree, winImageName } from './winproc.mjs';
 
 const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries', 'schemaRetries', 'fetchImpl', 'harness']);
 const DEFAULT_GRACE_MS = 8000;
@@ -37,6 +38,21 @@ export function reapStrays(spawns, tell = () => {}) {
     const pgid = rec?.pid;
     if (typeof pgid !== 'number' || pgid <= 1) continue;
     let argv0;
+    if (process.platform === 'win32') {
+      // No /proc: identify the pid by its image name via tasklist. Strict
+      // match only (a harness launched through a node/cmd shim shows up as
+      // node.exe/cmd.exe, which is too generic to kill on a pid hit alone).
+      const img = winImageName(pgid);
+      if (img === null) continue; // not running (or tasklist unavailable)
+      const base = String(rec.bin ?? '').toLowerCase().replace(/\.(exe|cmd|bat|com)$/, '');
+      if (!base || !img.startsWith(base)) {
+        tell(`stray check [${i}] ${rec.label}: pid ${pgid} alive but image is '${img}' not '${rec.bin}' — left alone`);
+        continue;
+      }
+      if (!killTree(pgid, 'SIGKILL')) { tell(`stray [${i}] ${rec.label}: taskkill failed for pid ${pgid}`); continue; }
+      tell(`reaped stray [${i}] ${rec.label} (pid ${pgid} still running from a dead parent)`);
+      continue;
+    }
     try { argv0 = readFileSync(`/proc/${pgid}/cmdline`, 'utf8').split('\0')[0]; }
     catch { continue; }
     if (!argv0.includes(rec.bin ?? '')) {
@@ -167,6 +183,7 @@ export async function runScript(opts) {
     resumeId = null,
     graceMs = DEFAULT_GRACE_MS,
     via = null,
+    model: defaultModel = null,
     cache = false,
     maxAgents = 1000,
     retries = 0,
@@ -269,6 +286,10 @@ export async function runScript(opts) {
       logLine(`${spec.label} -> null (unknown harness '${spec.harness}')`);
       return null;
     }
+    // Run-level default model (--model / AGENTFLOW_MODEL / config `model`):
+    // fills in calls that omit one. Claude harness only — model names are
+    // harness-specific, so a claude alias must never leak into codex/devin.
+    if (defaultModel && !spec.model && callAdapter.name === 'claude') spec.model = defaultModel;
     const fp = fpOf(callAdapter.name, spec);
 
     const rec = prior?.settled.get(i);

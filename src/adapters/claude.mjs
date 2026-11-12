@@ -6,9 +6,18 @@ import { spawnAgent as run, extractJson, probeBinary, withSchemaPrompt } from '.
 // KTD7: default 'auto'; 'escalated' -> 'bypassPermissions'.
 const PERMISSION_MAP = { escalated: 'bypassPermissions', auto: 'auto', acceptEdits: 'acceptEdits', bypassPermissions: 'bypassPermissions', manual: 'manual', plan: 'plan', dontAsk: 'dontAsk' };
 
+// Friendly tier names -> real `claude --model` aliases (claude harness only).
+// Anything else is passed through literally, so full model ids still work.
+export const MODEL_ALIASES = { cheap: 'haiku', default: 'sonnet' };
+export const resolveModel = (m) => MODEL_ALIASES[String(m).toLowerCase()] ?? m;
+
 export default {
   name: 'claude',
   bin: 'claude',
+  // Only consulted when claude resolves to a Windows .cmd/.bat shim that has
+  // to go through cmd.exe: the prompt then travels on stdin (`claude -p` reads
+  // it) instead of the command line, so quotes/newlines can't be mangled.
+  promptViaStdin: true,
   modelFlag: '--model',
   requiredFlags: ['--print', '--output-format', '--model', '--permission-mode'],
   permissionDeniedPatterns: [
@@ -20,7 +29,7 @@ export default {
 
   buildArgv(spec) {
     const argv = [this.bin, '-p', spec.prompt, '--output-format', 'json', '--permission-mode', PERMISSION_MAP[spec.permission] ?? 'auto'];
-    if (spec.model) argv.push('--model', spec.model);
+    if (spec.model) argv.push('--model', resolveModel(spec.model));
     return argv;
   },
 

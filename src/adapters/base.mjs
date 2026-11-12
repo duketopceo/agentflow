@@ -1,20 +1,41 @@
 import { spawn } from 'node:child_process';
 import { which } from './which.mjs';
+import { killTree, planWindowsSpawn } from '../winproc.mjs';
 
 const STDERR_TAIL = 8192;
 
 // spawn a CLI, capture stdout/stderr, enforce timeout and abort.
 // Never throws: failures return a structured result for the caller to classify.
-export function spawnProcess(argv, { cwd, timeout, signal, env, onSpawn } = {}) {
+export async function spawnProcess(argv, { cwd, timeout, signal, env, onSpawn, stdinArg } = {}) {
+  const win = process.platform === 'win32';
+  let file = argv[0], args = argv.slice(1), input = null, extra = {};
+  if (win) {
+    // Windows: resolve via PATHEXT; npm .cmd shims are unwrapped (or run via
+    // cmd.exe with escaped args) because Node >=20 refuses to spawn .cmd/.bat
+    // directly (EINVAL) and a bare name only finds .exe.
+    const plan = await planWindowsSpawn(argv, { env: env ?? process.env, stdinArg });
+    if (plan.error) return { spawnError: plan.error };
+    ({ file, args, input } = plan);
+    extra = plan.options;
+  }
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(argv[0], argv.slice(1), {
+      child = spawn(file, args, {
         cwd: cwd ?? process.cwd(),
         env: env ?? process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: true,
+        stdio: [input != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+        // POSIX: own process group so the whole tree can be killed. Windows
+        // has no groups (taskkill /T walks the tree) and detached would
+        // open a console window.
+        detached: !win,
+        windowsHide: true,
+        ...extra,
       });
+      if (input != null) {
+        child.stdin.on('error', () => {});
+        child.stdin.end(input);
+      }
       child.on('spawn', () => {
         try { process.setpgid(child.pid, child.pid); } catch {}
         // The child is a process-group leader (detached + setpgid) so timeout
@@ -30,9 +51,7 @@ export function spawnProcess(argv, { cwd, timeout, signal, env, onSpawn } = {}) 
     }
     let stdout = '', stderr = '', timedOut = false, done = false;
     const finish = (r) => { if (!done) { done = true; resolve(r); } };
-    const killGroup = (sig) => {
-      try { process.kill(-child.pid, sig); } catch { child.kill(sig); }
-    };
+    const killGroup = (sig) => { killTree(child.pid, sig, child); };
     const timer = timeout ? setTimeout(() => { timedOut = true; killGroup('SIGTERM'); setTimeout(() => killGroup('SIGKILL'), 2000).unref(); }, timeout) : null;
     const onAbort = () => killGroup('SIGKILL');
     if (signal) {
@@ -248,7 +267,7 @@ export async function spawnAgent(adapter, spec) {
     return { ok: false, error: { message: wrapped.error, stderrTail: '', code: null, timedOut: false, permissionDenied: false } };
   }
   const argv = wrapped.argv;
-  const r = await spawnProcess(argv, { cwd: spec.cwd, timeout: spec.timeout, signal: spec.signal, env: adapter.buildEnv?.(spec), onSpawn: spec.onSpawn });
+  const r = await spawnProcess(argv, { cwd: spec.cwd, timeout: spec.timeout, signal: spec.signal, env: adapter.buildEnv?.(spec), onSpawn: spec.onSpawn, stdinArg: adapter.promptViaStdin ? spec.prompt : undefined });
   if (r.spawnError) return { ok: false, error: classifyFailure(r, adapter.permissionDeniedPatterns) };
   if (r.code === 0 && !r.timedOut) {
     const result = adapter.parse(r, spec);

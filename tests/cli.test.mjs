@@ -1,8 +1,9 @@
 import test from 'node:test';
+import { sleepCmd, sleepBin } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, delimiter } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -25,7 +26,8 @@ function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'af-cli-'));
   return {
     dir,
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    // retries: on Windows a just-exited detached child can still hold the dir briefly
+    cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }),
     write(name, src) { writeFileSync(join(dir, name), src); return name; },
   };
 }
@@ -108,7 +110,7 @@ test('--detach --resume: parent reports the RESUMED journal id, not a fresh one'
   }
 });
 
-test('--detach --tmux: spawns a tmux split-pane watch when $TMUX is set', async () => {
+test('--detach --tmux: spawns a tmux split-pane watch when $TMUX is set', { skip: process.platform === 'win32' && 'tmux is POSIX-only' }, async () => {
   const f = fixture();
   const argvFile = join(f.dir, 'tmux-argv.txt');
   const fakebin = fileURLToPath(new URL('fakebin', import.meta.url));
@@ -118,7 +120,7 @@ test('--detach --tmux: spawns a tmux split-pane watch when $TMUX is set', async 
       const p = spawn(process.execPath, [BIN, 'run', 'w.mjs', '--harness', 'echo', '--detach', '--tmux'], {
         cwd: f.dir,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, TMUX: '/tmp/fake-tmux-sock,1,0', FAKEBIN_ARGV_FILE: argvFile, PATH: `${fakebin}:${process.env.PATH}` },
+        env: { ...process.env, TMUX: '/tmp/fake-tmux-sock,1,0', FAKEBIN_ARGV_FILE: argvFile, PATH: `${fakebin}${delimiter}${process.env.PATH}` },
       });
       let out = '', errOut = '';
       p.stdout.on('data', (d) => (out += d));
@@ -223,7 +225,7 @@ function seedJournal(dir, runId, recs) {
   for (const rec of recs) appendFileSync(join(runsDir, `${runId}.jsonl`), JSON.stringify(rec) + '\n');
 }
 
-test('stop: live detached run reaches run-end via SIGTERM', async () => {
+test('stop: live detached run reaches run-end via SIGTERM', { skip: process.platform === 'win32' && 'needs POSIX signal delivery (SIGINT/SIGTERM)' }, async () => {
   const f = fixture();
   try {
     process.env.AGENTFLOW_ECHO_SLOW = '60000';
@@ -284,7 +286,7 @@ test('orphan: dead-pid journal reads as orphaned in status/list/stop', async () 
 
 test('stop: pid-reuse guard refuses a live process started after journal time', async () => {
   const f = fixture();
-  const sleeper = spawn('sleep', ['60']);
+  const sleeper = spawn(...sleepCmd(60));
   try {
     // Journal claims pid started 10s ago; sleeper started ~now -> mismatch.
     seedJournal(f.dir, 'reuse-1', [
@@ -396,7 +398,7 @@ test('stop: malformed run-start.at refuses to signal (NaN must not bypass)', asy
 
 test('stop: a reused pid (non-agentflow process) is refused even when timestamp matches', async () => {
   const f = fixture();
-  const sleeper = spawn('sleep', ['60']);
+  const sleeper = spawn(...sleepCmd(60));
   try {
     seedJournal(f.dir, 'other-1', [
       { type: 'run-start', runId: 'other-1', script: 'w.mjs', harness: 'echo', pid: sleeper.pid, at: new Date().toISOString() },

@@ -6,6 +6,7 @@ import { runScript } from './runtime.mjs';
 import { Journal } from './journal.mjs';
 import { readJournal, foldState, renderFrame } from './watch.mjs';
 import { adapters, getAdapter } from './adapters/index.mjs';
+import { killTree, winStartMs, winCmdline } from './winproc.mjs';
 
 const USAGE = `agentflow — cross-harness dynamic workflows
 
@@ -13,7 +14,7 @@ usage:
   agentflow run <script.mjs> [--harness <name>] [--concurrency <n>]
                 [--via ori] [--cache] [--allow-nondeterminism] [--max-agents <n>]
                 [--retries <n>] [--resume <run-id>] [--grace <ms>]
-                [--cwd <dir>] [--detach] [--tmux] [--args-json <json>]
+                [--model <name>] [--cwd <dir>] [--detach] [--tmux] [--args-json <json>]
                 [-- <script args>...]
   agentflow status <run-id>        progress + outcome from the journal
   agentflow tail <run-id>          stream journal events until run-end
@@ -26,7 +27,9 @@ usage:
   agentflow list
   agentflow init                   create a minimal project configuration
 
-config: agentflow.json in cwd — {"harness": "devin", "concurrency": 8, "via": "ori"}
+config: agentflow.json in cwd — {"harness": "devin", "concurrency": 8, "via": "ori", "model": "sonnet"}
+  default model (claude harness only; aliases: cheap=haiku, default=sonnet):
+  --model > $AGENTFLOW_MODEL > config "model"
 `;
 
 // Flags that never take a value — otherwise `run --cache script.mjs` would
@@ -111,6 +114,8 @@ export async function main(argv = process.argv.slice(2)) {
       cwd,
       args,
       via: flags.via ?? config.via ?? null,
+      // default model for claude-harness calls that omit one: flag > env > config
+      model: (typeof flags.model === 'string' ? flags.model : null) ?? (process.env.AGENTFLOW_MODEL || null) ?? (typeof config.model === 'string' ? config.model : null),
       cache: !!(flags.cache || config.cache),
       allowNondeterminism: !!(flags['allow-nondeterminism'] || config.allowNondeterminism),
       maxAgents: num.maxAgents ?? 1000,
@@ -216,7 +221,7 @@ function detachRun(cwd, rawArgv) {
   const head = dd === -1 ? childArgv : childArgv.slice(0, dd);
   const tail = dd === -1 ? [] : childArgv.slice(dd);
   const args = [SELF, ...head, '--run-id', runId, '--cwd', cwd, ...tail];
-  const child = spawn(process.execPath, args, { detached: true, stdio: ['ignore', logFd, logFd], cwd });
+  const child = spawn(process.execPath, args, { detached: true, stdio: ['ignore', logFd, logFd], cwd, windowsHide: true });
   child.unref();
   process.stdout.write(`run ${runId}${resumeId ? ' (resumed)' : ''} (detached, pid ${child.pid})\n  watch:  agentflow watch ${runId}\n  status: agentflow status ${runId}\n`);
   if (rawArgv.includes('--tmux')) tmuxWatch(cwd, runId);
@@ -323,7 +328,8 @@ function pidState(rs) {
   if (!Number.isInteger(pid) || pid <= 0) return 'dead';
   try { process.kill(pid, 0); } catch (e) { return e.code === 'EPERM' ? 'reused' : 'dead'; }
   let cmdline = null;
-  try { cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8'); } catch {}
+  if (process.platform === 'win32') cmdline = winCmdline(pid); // null if unavailable
+  else { try { cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8'); } catch {} }
   if (cmdline !== null && !cmdline.includes('agentflow')) return 'reused';
   const at = Date.parse(rs.at);
   if (!Number.isFinite(at)) return 'live-unverified';
@@ -339,6 +345,7 @@ function pidAlive(pid) {
 
 // Process start time via elapsed seconds (ps -o etimes=); start ≈ now - etimes.
 function procStartMs(pid) {
+  if (process.platform === 'win32') return winStartMs(pid); // no `ps` on Windows
   const out = execFileSync('ps', ['-o', 'etimes=', '-p', String(pid)], { encoding: 'utf8' }).trim();
   const secs = Number(out);
   if (!out || !Number.isFinite(secs)) throw new Error(`no start time for pid ${pid}`);
@@ -366,18 +373,27 @@ async function stopCmd(cwd, runId) {
     process.stderr.write(`agentflow: refusing to signal pid ${rs.pid} — cannot verify it is this run's process (${state === 'reused' ? 'pid likely reused' : 'no verifiable timestamp'})\n`);
     return 1;
   }
-  try { process.kill(rs.pid, 'SIGTERM'); }
-  catch (e) {
+  const win = process.platform === 'win32';
+  try {
+    // Windows has no signals: process.kill(pid) is an immediate hard kill that
+    // would orphan the run's harness children, so kill the whole tree instead.
+    // The run cannot journal run-end after that; resume picks it up.
+    if (win) { if (!killTree(rs.pid, 'SIGTERM')) { const e = new Error('taskkill failed'); e.code = 'ESRCH'; throw e; } }
+    else process.kill(rs.pid, 'SIGTERM');
+  } catch (e) {
     if (e.code !== 'ESRCH') { process.stderr.write(`agentflow: signal failed: ${e.message}\n`); return 1; }
     process.stdout.write(`pid ${rs.pid} exited before signal; checking journal\n`);
     rs.pid = null; // don't misreport a signal we never delivered
   }
-  if (rs.pid !== null) process.stdout.write(`SIGTERM -> pid ${rs.pid}; waiting for run-end\n`);
+  if (rs.pid !== null) process.stdout.write(win ? `terminated process tree of pid ${rs.pid}; waiting for run-end\n` : `SIGTERM -> pid ${rs.pid}; waiting for run-end\n`);
   const waitMs = Math.max(25_000, (rs.graceMs ?? 8_000) + 15_000);
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     if (Journal.load(path).ended) { process.stdout.write(`run ${runId} ended\n`); return 0; }
-    if (rs.pid !== null && !pidAlive(rs.pid)) { process.stdout.write(`run ${runId} exited without run-end (orphaned)\n`); return 1; }
+    if (rs.pid !== null && !pidAlive(rs.pid)) {
+      if (win) { process.stdout.write(`run ${runId} stopped (Windows cannot deliver a graceful signal, so no run-end was journaled; ${resumeHint(rs, runId)})\n`); return 0; }
+      process.stdout.write(`run ${runId} exited without run-end (orphaned)\n`); return 1;
+    }
     await new Promise((r) => setTimeout(r, 250));
   }
   process.stderr.write(`agentflow: SIGTERM delivered; run ${runId} still draining past ${Math.round(waitMs / 1000)}s — poll: agentflow status ${runId}\n`);
@@ -389,6 +405,10 @@ async function stopCmd(cwd, runId) {
 // --all also sweeps unrecorded dirs under <gitroot>/.agentflow/worktrees/.
 // Journaled paths are user-writable data, not an rm -rf grant: every delete
 // is contained to paths inside some .agentflow/worktrees/ dir.
+// git prints forward-slash paths on Windows; compare in one canonical form.
+// POSIX paths are returned untouched.
+const normP = (p) => (process.platform === 'win32' ? resolve(p).toLowerCase() : p);
+
 function cleanCmd(cwd, flags) {
   let top = cwd;
   try { top = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(); } catch {}
@@ -396,9 +416,9 @@ function cleanCmd(cwd, flags) {
   const registered = new Set();
   try {
     for (const line of execFileSync('git', ['-C', top, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }).split('\n'))
-      if (line.startsWith('worktree ')) registered.add(line.slice(9));
+      if (line.startsWith('worktree ')) registered.add(normP(line.slice(9).trim()));
   } catch {}
-  const insideWtRoot = (p) => { try { return realpathSync(p).includes('/.agentflow/worktrees/'); } catch { return false; } };
+  const insideWtRoot = (p) => { try { return realpathSync(p).replace(/\\/g, '/').includes('/.agentflow/worktrees/'); } catch { return false; } };
   const journaled = new Set();
   const roots = new Set([top]);
   let removed = 0;
@@ -426,7 +446,7 @@ function cleanCmd(cwd, flags) {
       if (journaled.has(p)) continue;
       // registered-but-unjournaled may belong to a live run journaled under
       // another cwd — sweep only true strays, leave registrations to prune
-      if (registered.has(p)) process.stdout.write(`keep ${p} (registered worktree, no journal record)\n`);
+      if (registered.has(normP(p))) process.stdout.write(`keep ${p} (registered worktree, no journal record)\n`);
       else drop(p);
     }
   }

@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { runScript } from '../src/runtime.mjs';
 import echo from '../src/adapters/echo.mjs';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 function makeDir() {
   const dir = mkdtempSync(join(tmpdir(), 'af-wf-'));

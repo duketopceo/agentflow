@@ -67,7 +67,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const res = await runRow(row, opts.script);
     results.push(res);
     if (!opts.json) {
-      const inv = `agentflow run ${opts.script.split('/').pop()} --harness ${res.harness}${res.via ? ` --via ${res.via}` : ''}`;
+      const inv = `agentflow run ${opts.script.split(/[\\/]/).pop()} --harness ${res.harness}${res.via ? ` --via ${res.via}` : ''}`;
       process.stdout.write(`| ${res.name} | \`${inv}\` | ${res.text} | ${(res.latencyMs / 1000).toFixed(1)}s | ${res.spend ?? '—'} |\n`);
     }
   }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, delimiter } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { probeTaskQueue, taskQueueLauncher, TASK_QUEUE_SPEC } from '../src/taskqueue.mjs';
@@ -11,6 +11,11 @@ const BIN = fileURLToPath(new URL('../bin/agentflow', import.meta.url));
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 function stub(dir, name) {
+  if (process.platform === 'win32') {
+    const w = join(dir, name + '.CMD');
+    writeFileSync(w, '@echo off\r\nexit /b 0\r\n');
+    return w;
+  }
   const p = join(dir, name);
   writeFileSync(p, '#!/bin/sh\nexit 0\n');
   chmodSync(p, 0o755);
@@ -22,7 +27,7 @@ function stub(dir, name) {
 async function withPath(dirs, fn) {
   const saved = process.env.PATH;
   try {
-    process.env.PATH = dirs.join(':');
+    process.env.PATH = dirs.join(delimiter);
     return await fn();
   } finally {
     process.env.PATH = saved;
@@ -66,7 +71,7 @@ test('probeTaskQueue: neither launcher reports unavailable with guidance', async
 test('doctor prints a non-fatal task-queue note', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'af-tq-doctor-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const env = { ...process.env, PATH: `${dirname(process.execPath)}:${dir}` };
+  const env = { ...process.env, PATH: `${dirname(process.execPath)}${delimiter}${dir}` };
   const { code, out } = await new Promise((resolve, reject) => {
     const p = spawn(process.execPath, [BIN, 'doctor'], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';

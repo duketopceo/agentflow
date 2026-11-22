@@ -16,6 +16,7 @@
 // subcommands (doctor, status, list) write to stdout. Capture both regardless:
 // the tool surface should not depend on which stream a given subcommand picks.
 import { execFile } from 'node:child_process';
+import { planWindowsSpawn } from './winproc.mjs';
 
 // Tool-facing strings shared by the plugin arms and the MCP tool list. The
 // SDKs disagree on schema SHAPE (JSON Schema vs the v1 `tool.schema` Zod
@@ -84,8 +85,16 @@ const SPAWN_FAILURE = {
 };
 
 export function runAgentflow(argv, { cwd, timeoutMs = 30 * 60_000, bin = 'agentflow' } = {}) {
-  return new Promise((resolve) => {
-    execFile(bin, argv, { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+  return new Promise(async (resolve) => {
+    let file = bin, args = argv, extra = {};
+    if (process.platform === 'win32') {
+      // npm installs `agentflow` as a .cmd shim, which execFile cannot run
+      // directly on Node >=20; resolve it (PATHEXT) and unwrap/escape.
+      const plan = await planWindowsSpawn([bin, ...argv]);
+      if (plan.error) return resolve({ code: 1, out: plan.error });
+      file = plan.file; args = plan.args; extra = plan.options;
+    }
+    execFile(file, args, { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true, ...extra }, (err, stdout, stderr) => {
       const combined = `${stdout}${stderr}`;
       if (!err) return resolve({ code: 0, out: combined || 'agentflow produced no output' });
 

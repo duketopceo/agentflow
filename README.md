@@ -145,9 +145,32 @@ const good = results.filter(Boolean);   // a failed call is null, not an excepti
 ```
 
 Commands: `run`, `status <run-id>`, `tail <run-id>`, `watch [run-id]`, `list`, `doctor`.
-Useful flags: `--harness`, `--concurrency`, `--via ori`, `--cache`, `--resume <run-id>`,
+Useful flags: `--harness`, `--model`, `--concurrency`, `--via ori`, `--cache`, `--resume <run-id>`,
 `--retries`, `--max-agents`, `--allow-nondeterminism`, `--detach`.
 
+## Models and Windows
+
+**Models.** `agent(prompt, { model })` is passed to the harness unchanged, except on
+`--harness claude` where two friendly aliases are expanded: `cheap` -> `haiku`,
+`default` -> `sonnet` (full names such as `claude-sonnet-4-5` pass through). On any
+other harness use that harness's real model names; `"cheap"` is not valid there.
+
+To pin workers when a workflow omits `model`, set a run-wide default (claude harness
+only, since model names are harness-specific). Precedence: `--model` flag, then
+`AGENTFLOW_MODEL`, then `"model"` in `agentflow.json` (see `agentflow.example.json`).
+
+```bash
+bin/agentflow run my-workflow.mjs --harness claude --model haiku
+AGENTFLOW_MODEL=sonnet bin/agentflow run my-workflow.mjs --harness claude
+```
+
+**Windows.** Binaries are resolved via `PATH` + `PATHEXT` (`.exe`, `.cmd`, ...). npm `.cmd`
+shims are unwrapped and run directly, so prompts with quotes/newlines are safe. A
+non-npm `.cmd`/`.bat` goes through `cmd.exe` with escaped args; arguments containing a
+newline or `%VAR%` are refused there (claude receives its prompt on stdin instead).
+Timeouts and aborts use `taskkill /T /F`. Limits: `agentflow stop` hard-kills the run's
+process tree (no graceful `run-end`; use `--resume`), `--tmux` needs tmux, and stray reaping
+on `--resume` only recognises harnesses whose process image matches the binary name.
 ## How it works
 
 ```mermaid

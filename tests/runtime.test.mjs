@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { sleepCmd, sleepBin } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -375,7 +376,7 @@ test('missing binary returns null with error, not a crash', async () => {
   assert.match(r.error.message, /spawn failed|ENOENT/);
 });
 
-test('SIGINT: queued calls never start, settled journaled, run resumable', async (t) => {
+test('SIGINT: queued calls never start, settled journaled, run resumable', { skip: process.platform === 'win32' && 'needs POSIX signal delivery (SIGINT/SIGTERM)' }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'af-sig-'));
   try {
     writeFileSync(join(dir, 'w.mjs'), `log('boot');
@@ -772,20 +773,20 @@ test('retries: permissionDenied and timeout are never retried', async () => {
 });
 
 test('reapStrays kills a live journaled process group, leaves dead and foreign ones', async () => {
-  const sleeper = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const sleeper = spawn(...sleepCmd(30), { detached: true, stdio: 'ignore' });
   try { process.setpgid(sleeper.pid, sleeper.pid); } catch {}
   const lines = [];
   const tell = (s) => lines.push(s);
   try {
     // Live group, matching binary name -> killed.
-    reapStrays(new Map([[0, { i: 0, label: 'U2', pid: sleeper.pid, bin: 'sleep' }]]), tell);
+    reapStrays(new Map([[0, { i: 0, label: 'U2', pid: sleeper.pid, bin: sleepBin }]]), tell);
     await new Promise((r) => setTimeout(r, 100));
     assert.throws(() => process.kill(sleeper.pid, 0), /ESRCH/);
     assert.ok(lines.some((l) => l.includes('reaped stray [0] U2')));
 
     // Already-dead pgid -> skipped silently.
     lines.length = 0;
-    reapStrays(new Map([[1, { i: 1, label: 'dead', pid: sleeper.pid, bin: 'sleep' }]]), tell);
+    reapStrays(new Map([[1, { i: 1, label: 'dead', pid: sleeper.pid, bin: sleepBin }]]), tell);
     assert.equal(lines.length, 0);
   } finally {
     try { process.kill(-sleeper.pid, 'SIGKILL'); } catch {}
@@ -793,7 +794,7 @@ test('reapStrays kills a live journaled process group, leaves dead and foreign o
   }
 
   // argv0 mismatch (pid reuse guard) -> left alone with a warning.
-  const other = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+  const other = spawn(...sleepCmd(30), { detached: true, stdio: 'ignore' });
   try { process.setpgid(other.pid, other.pid); } catch {}
   try {
     lines.length = 0;

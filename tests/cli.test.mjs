@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+import { lstartToMs } from '../src/cli.mjs';
 
 const BIN = fileURLToPath(new URL('../bin/agentflow', import.meta.url));
 
@@ -22,7 +24,7 @@ function cli(args, cwd, timeoutMs = 15000) {
 }
 
 function fixture() {
-  const dir = mkdtempSync(join(tmpdir(), 'af-cli-'));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'af-cli-')));
   return {
     dir,
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
@@ -499,4 +501,23 @@ test('run-id path traversal is rejected for status and --run-id', async () => {
     assert.equal(run.code, 1);
     assert.ok(run.err.includes('invalid run-id'), run.err);
   } finally { f.cleanup(); }
+});
+
+test('lstartToMs resolves either occurrence of a repeated DST hour', () => {
+  const prevTz = process.env.TZ;
+  process.env.TZ = 'America/New_York';
+  try {
+    const wall = 'Sun Nov  1 01:30:00 2026';
+    const first = Date.parse('2026-11-01T05:30:00Z');
+    const second = Date.parse('2026-11-01T06:30:00Z');
+    assert.equal(lstartToMs(wall, first), first);
+    assert.equal(lstartToMs(wall, second), second);
+    // Spring-forward wall time is unambiguous — no spurious earlier instant.
+    const spring = 'Sun Mar  8 03:30:00 2026';
+    const real = Date.parse('2026-03-08T07:30:00Z');
+    assert.equal(lstartToMs(spring, real), real);
+    assert.equal(lstartToMs(spring, Date.parse('2026-03-08T06:30:00Z')), real);
+  } finally {
+    if (prevTz === undefined) delete process.env.TZ; else process.env.TZ = prevTz;
+  }
 });

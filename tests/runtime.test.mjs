@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -631,7 +631,9 @@ log('done');`);
 });
 
 test("worktree 'auto': call runs in a provisioned git worktree, journaled", async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'af-wt-'));
+  // realpath: git rev-parse --show-toplevel returns the physical path, which on
+  // macOS is /private/var/... while tmpdir() reports the symlinked /var/....
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'af-wt-')));
   try {
     execFileSync('git', ['init', '-q'], { cwd: dir });
     execFileSync('git', ['-C', dir, 'config', 'user.email', 't@t']);
@@ -666,7 +668,7 @@ log('R:' + r.filter(Boolean).length);`);
 // A git fixture for the worktree resume tests: repo + seeded journal naming
 // a deterministic run-id, like an interrupted prior attempt left behind.
 function wtFixture() {
-  const dir = mkdtempSync(join(tmpdir(), 'af-wtr-'));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'af-wtr-')));
   execFileSync('git', ['init', '-q'], { cwd: dir });
   execFileSync('git', ['-C', dir, 'config', 'user.email', 't@t']);
   execFileSync('git', ['-C', dir, 'config', 'user.name', 't']);
@@ -817,4 +819,31 @@ test('spawn records are journaled for real harness spawns only', async () => {
     assert.equal(meta.spawns.size, 0);
     assert.equal(meta.settled.get(0).ok, true);
   } finally { f.cleanup(); }
+});
+
+test('debug spine: AGENTFLOW_DEBUG=1 writes <runId>.spine.jsonl with run/agent events', async () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'af-spine-')));
+  const prev = process.env.AGENTFLOW_DEBUG;
+  process.env.AGENTFLOW_DEBUG = '1';
+  try {
+    writeFileSync(join(dir, 'sp.mjs'), "const r = await agent('say hi', { label: 'hi' });\nlog('DONE');\n");
+    const res = await runScript({ scriptPath: join(dir, 'sp.mjs'), adapter: echo, cwd: dir, err: () => {} });
+    assert.equal(res.code, 0);
+    const spinePath = join(Journal.dirFor(dir), 'spine', `${res.runId}.jsonl`);
+    const lines = readFileSync(spinePath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const events = lines.map((e) => e.event);
+    assert.equal(events[0], 'run.start', 'first event is run.start');
+    assert.ok(events.includes('agent.start'), 'agent.start present');
+    const start = lines.find((e) => e.event === 'agent.start');
+    assert.equal(start.label, 'hi');
+    assert.ok(lines.some((e) => e.event === 'agent.settled' && e.ok === true), 'agent.settled ok recorded');
+    assert.equal(lines[lines.length - 1].event, 'run.end', 'last event is run.end');
+    // --resume reuses runId + spine path: seq must continue, not restart.
+    await runScript({ scriptPath: join(dir, 'sp.mjs'), adapter: echo, cwd: dir, runId: res.runId, err: () => {} });
+    const lines2 = readFileSync(spinePath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(lines2[lines.length].seq, lines.length + 1, 'resume continues seq');
+  } finally {
+    if (prev === undefined) delete process.env.AGENTFLOW_DEBUG; else process.env.AGENTFLOW_DEBUG = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

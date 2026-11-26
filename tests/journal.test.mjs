@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Journal } from '../src/journal.mjs';
@@ -80,6 +80,19 @@ test('load aggregates per-call usage from result and error records', () => {
     j.append({ type: 'agent', i: 2, ok: true, result: { text: 'no usage' } });
     const u = Journal.load(j.path).usage;
     assert.deepEqual(u, { promptTokens: 1500, completionTokens: 60, cachedTokens: 200, steps: 3, calls: 2 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Journal.list keeps any .jsonl run id (spine files live in their own dir)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'af-jlist-'));
+  try {
+    mkdirSync(Journal.dirFor(dir), { recursive: true });
+    writeFileSync(join(Journal.dirFor(dir), '2026-11-25T00-00-00-abc.jsonl'), '');
+    writeFileSync(join(Journal.dirFor(dir), 'release.spine.jsonl'), '');
+    const runs = Journal.list(dir).map((r) => r.runId).sort();
+    assert.deepEqual(runs, ['2026-11-25T00-00-00-abc', 'release.spine']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

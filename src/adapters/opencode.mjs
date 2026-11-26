@@ -17,7 +17,7 @@ export default {
   bin: 'opencode',
   modelFlag: '-m',
   helpArgs: ['run', '--help'],
-  requiredFlags: ['--format', '--model', '--agent', '--dir', '--auto'],
+  requiredFlags: ['--format', '--model', '--agent', '--auto'],
   permissionDeniedPatterns: [
     /permission (denied|required)/i,
     /approval (required|denied)/i,
@@ -29,7 +29,8 @@ export default {
     const argv = [this.bin, 'run', spec.prompt, '--format', 'json'];
     if (spec.model) argv.push('-m', spec.model);
     if (spec.agentName) argv.push('--agent', spec.agentName);
-    if (spec.cwd) argv.push('--dir', spec.cwd);
+    // OpenCode 2.x has no --dir flag; the working directory is the spawned
+    // process cwd, which base.spawnProcess already sets from spec.cwd.
     if (spec.permission === 'escalated') argv.push('--auto');
     return argv;
   },

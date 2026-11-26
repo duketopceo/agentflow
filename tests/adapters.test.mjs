@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { extractJson, classifyFailure, probeBinary, spawnProcess, applyVia } from '../src/adapters/base.mjs';
@@ -90,7 +91,8 @@ test('opencode buildArgv + parse json event stream', () => {
   assert.deepEqual(argv.slice(0, 3), ['opencode', 'run', 'review this file']);
   assert.ok(argv.includes('--format') && argv.includes('json'));
   assert.ok(argv.includes('-m') && argv.includes('anthropic/claude-haiku'));
-  assert.ok(argv.includes('--dir') && argv.includes('/tmp/x'));
+  // OpenCode 2.x has no --dir flag; the spawned process cwd carries the cwd.
+  assert.ok(!argv.includes('--dir'), 'unexpected --dir in opencode argv');
   assert.ok(argv.includes('--auto'));
 
   const stream = readFileSync(join(FIXTURES, 'opencode-events.jsonl'), 'utf8');
@@ -186,5 +188,16 @@ test('openrouter spawnAgent fails cleanly without a key', async () => {
     assert.match(r.error.message, /OPENROUTER_API_KEY/);
   } finally {
     if (key) process.env.OPENROUTER_API_KEY = key;
+  }
+});
+
+test('spawnProcess clears a stale PWD so the child uses its spawn cwd', async () => {
+  const target = realpathSync(mkdtempSync(join(tmpdir(), 'af-pwd-')));
+  try {
+    const r = await spawnProcess(['node', '-e', 'process.stdout.write(String(process.env.PWD ?? "") + "|" + process.cwd())'], { cwd: target });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout.trim(), '|' + target);
+  } finally {
+    rmSync(target, { recursive: true, force: true });
   }
 });

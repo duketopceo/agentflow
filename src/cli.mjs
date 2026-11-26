@@ -324,10 +324,14 @@ function pidState(rs) {
   try { process.kill(pid, 0); } catch (e) { return e.code === 'EPERM' ? 'reused' : 'dead'; }
   let cmdline = null;
   try { cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8'); } catch {}
-  if (cmdline !== null && !cmdline.includes('agentflow')) return 'reused';
+  if (cmdline === null) {
+    // macOS has no /proc; `ps -o command=` prints the full command line.
+    try { cmdline = execFileSync('ps', ['-o', 'command=', '-ww', '-p', String(pid)], { encoding: 'utf8' }).trim(); } catch {}
+  }
+  if (cmdline !== null && cmdline !== '' && !cmdline.includes('agentflow')) return 'reused';
   const at = Date.parse(rs.at);
   if (!Number.isFinite(at)) return 'live-unverified';
-  try { if (Math.abs(procStartMs(pid) - at) > 5_000) return 'reused'; }
+  try { if (Math.abs(procStartMs(pid, at) - at) > 5_000) return 'reused'; }
   catch { return 'live-unverified'; }
   return 'live';
 }
@@ -337,12 +341,60 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } // EPERM = exists, can't signal
 }
 
-// Process start time via elapsed seconds (ps -o etimes=); start ≈ now - etimes.
-function procStartMs(pid) {
-  const out = execFileSync('ps', ['-o', 'etimes=', '-p', String(pid)], { encoding: 'utf8' }).trim();
-  const secs = Number(out);
-  if (!out || !Number.isFinite(secs)) throw new Error(`no start time for pid ${pid}`);
-  return Date.now() - secs * 1000;
+// UTC offset (ms) in effect at `at` for the local timezone. Used to resolve
+// zone-less `ps -o lstart=` during a DST transition, where Date.parse picks
+// one occurrence arbitrarily.
+function localOffsetMs(at) {
+  const part = new Intl.DateTimeFormat('en-US', { timeZoneName: 'longOffset' })
+    .formatToParts(at).find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+00:00';
+  const m = /^GMT([+-])(\d{2}):(\d{2})$/.exec(part);
+  if (!m) return 0;
+  return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) * 60_000;
+}
+
+const MONTH_NUM = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' };
+
+function localWallKey(at) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(at);
+  const v = Object.fromEntries(parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
+  return `${v.year}-${v.month}-${v.day}T${v.hour}:${v.minute}:${v.second}`;
+}
+
+// Export for the DST regression test. `ps lstart` has no offset: near a DST
+// change the wall time may map to two instants. Derive the other candidate and
+// keep it only when it maps back to the same wall time; otherwise an
+// unambiguous time could admit a second, wrong instant.
+export function lstartToMs(out, expectedMs) {
+  const naive = Date.parse(out);
+  if (!Number.isFinite(naive)) throw new Error(`no valid lstart: ${out}`);
+  const m = /^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})/.exec(out);
+  if (!m || !MONTH_NUM[m[1]]) throw new Error(`no valid lstart: ${out}`);
+  const wall = `${m[6]}-${MONTH_NUM[m[1]]}-${m[2].padStart(2, '0')}T${m[3]}:${m[4]}:${m[5]}`;
+  const candidates = [naive];
+  const before = localOffsetMs(new Date(naive - 2 * 3600_000));
+  const after = localOffsetMs(new Date(naive + 2 * 3600_000));
+  if (before !== after) candidates.push(naive + (before - after));
+  const valid = candidates.filter((c) => localWallKey(new Date(c)) === wall);
+  return (valid.length ? valid : [naive])
+    .reduce((best, c) => (Math.abs(c - expectedMs) < Math.abs(best - expectedMs) ? c : best));
+}
+
+// Process start time (≈ now - elapsed). Linux ps has `etimes`; macOS ps does
+// not, so there fall back to `lstart`, resolved against the journal timestamp.
+function procStartMs(pid, expectedMs) {
+  let out;
+  try {
+    out = execFileSync('ps', ['-o', 'etimes=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+    const secs = Number(out);
+    if (!out || !Number.isFinite(secs)) throw new Error(`no start time for pid ${pid}`);
+    return Date.now() - secs * 1000;
+  } catch {
+    out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+    return lstartToMs(out, expectedMs);
+  }
 }
 
 const resumeHint = (rs, runId) => `resume: agentflow run ${rs?.script ?? '<script>'} --resume ${runId}`;

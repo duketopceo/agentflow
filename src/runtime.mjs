@@ -8,6 +8,7 @@ import { Journal } from './journal.mjs';
 import { cacheKey, cacheRead, cacheWrite } from './cache.mjs';
 import { validateJson } from './adapters/base.mjs';
 import { getAdapter } from './adapters/index.mjs';
+import { Spine } from './spine.mjs';
 
 const KNOWN_AGENT_OPTS = new Set(['label', 'model', 'schema', 'worktree', 'cwd', 'timeout', 'permission', 'via', 'reasoningEffort', 'retries', 'schemaRetries', 'fetchImpl', 'harness']);
 const DEFAULT_GRACE_MS = 8000;
@@ -223,6 +224,12 @@ export async function runScript(opts) {
     phases: Array.isArray(meta.phases) ? meta.phases.filter((p) => typeof p === 'string') : undefined,
   });
 
+  const spine = Spine.create({
+    path: join(journalDir, 'spine', `${runId}.jsonl`),
+    enabled: opts.debug ?? (process.env.AGENTFLOW_DEBUG === '1'),
+  });
+  spine.emit('run.start', { runId, script: scriptName, harness: adapter.name, cwd, concurrency, resumeId: resumeId ?? null });
+
   const pool = new Pool(concurrency);
   const abort = new AbortController();
   // Test seam + abort-aware sleep: tests inject an instant sleep; the default
@@ -235,6 +242,7 @@ export async function runScript(opts) {
     abort.signal.addEventListener('abort', () => { clearTimeout(t); r(); }, { once: true });
   }));
   const inFlight = new Set();
+  const completions = new Set(); // agent tasks still settling — drain before run.end
   const wtRoots = new Map(); // per-call-cwd -> git toplevel cache for worktree:'auto'
   let callIndex = 0;
   let phaseName = null;
@@ -242,6 +250,7 @@ export async function runScript(opts) {
   const t0 = Date.now();
   const elapsed = () => ((Date.now() - t0) / 1000).toFixed(1) + 's';
   const logLine = (s) => err(`[${elapsed()}]${phaseName ? ` [${phaseName}]` : ''} ${s}`);
+  const endSpine = (reason) => spine.emit('run.end', { reason, elapsedMs: Date.now() - t0, script: scriptName });
 
   // A prior epoch that died mid-call may have left its harness process group
   // alive — adapters spawn detached + setpgid precisely so timeout/abort can
@@ -296,7 +305,8 @@ export async function runScript(opts) {
     // Returns {cancelled:true} when the call never genuinely ran: drained
     // queue, aborted spawn, or a failure caused by our own abort. Cancelled
     // calls are not journaled — resume must re-execute them.
-    const settled = await pool.run(async () => {
+    spine.emit('agent.start', { i, label: spec.label, model: spec.model ?? null, worktree: spec.worktree ?? null, cwd: spec.cwd ?? null, promptLen: spec.prompt.length, retries: spec.retries ?? null });
+    const task = pool.run(async () => {
       if (abort.signal.aborted) return { cancelled: true };
       inFlight.add(spec);
       journal.append({ type: 'in-flight', i, label: spec.label, model: spec.model ?? null, harness: spec.harness ?? null, at: new Date().toISOString() });
@@ -370,6 +380,17 @@ export async function runScript(opts) {
       } finally {
         inFlight.delete(spec);
       }
+    });
+    completions.add(task);
+    const settled = await task.finally(() => completions.delete(task));
+
+    spine.emit('agent.settled', {
+      i, label: spec.label,
+      ok: !!settled?.ok,
+      cancelled: !!settled?.cancelled,
+      elapsedMs: settled ? Date.now() - started : null,
+      resultLen: settled?.ok ? String(settled.result?.text ?? '').length : null,
+      error: settled?.error?.message ?? null,
     });
 
     if (settled == null || settled.__agentflowError || settled.cancelled) {
@@ -582,6 +603,7 @@ export async function runScript(opts) {
       abort.abort();
       journal.append({ type: 'run-end', reason: 'interrupted', at: new Date().toISOString() });
       logLine(`run ${runId} interrupted — resume with: agentflow run ${scriptName} --resume ${runId}`);
+      endSpine('interrupted');
       realExit(firstExitCode);
     }
     interrupted = true;
@@ -601,6 +623,7 @@ export async function runScript(opts) {
       }
       journal.append({ type: 'run-end', reason: 'interrupted', at: new Date().toISOString() });
       logLine(`run ${runId} interrupted — resume with: agentflow run ${scriptName} --resume ${runId}`);
+      endSpine('interrupted');
       realExit(exitCode);
     })();
   }
@@ -627,6 +650,7 @@ ${body}
   } catch (e) {
     journal.append({ type: 'run-end', reason: 'error', at: new Date().toISOString() });
     err(`agentflow: syntax error in ${scriptName}: ${e.message}`);
+    endSpine('error');
     return { code: 1, runId, journalPath };
   }
 
@@ -641,6 +665,7 @@ ${body}
     ret = await fn(agent, parallel, pipeline, phase, log, batch, args, meta, shimDate, shimMath, shimCrypto, cwd);
     // If a signal is mid-handling, wait for it: in-flight results must be
     // journaled and the exit code must be the signal code, not success.
+    // signalPromise's drain path emits run.end before its realExit.
     if (signalPromise) realExit(await signalPromise);
     journal.append({ type: 'run-end', reason: 'ok', ...(ret !== undefined ? { result: jsonSafe(ret) } : {}), at: new Date().toISOString() });
   } catch (e) {
@@ -664,8 +689,17 @@ ${body}
       pool.drain();
       abort.abort();
     }
+    if (completions.size) {
+      // Let cancelled agent calls append their agent.settled before run.end,
+      // but don't let an abort-ignoring adapter block the terminal event.
+      await Promise.race([
+        Promise.allSettled([...completions]),
+        new Promise((r) => setTimeout(r, 2000)),
+      ]);
+    }
     process.off('SIGINT', sigint);
     process.off('SIGTERM', sigterm);
   }
+  endSpine(code === 0 ? 'ok' : 'error');
   return { code, runId, journalPath, result: ret };
 }

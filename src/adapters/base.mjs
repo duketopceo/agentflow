@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { resolve as resolvePath } from 'node:path';
 import { which } from './which.mjs';
 
 const STDERR_TAIL = 8192;
@@ -9,9 +10,15 @@ export function spawnProcess(argv, { cwd, timeout, signal, env, onSpawn } = {}) 
   return new Promise((resolve) => {
     let child;
     try {
+      const runCwd = resolvePath(cwd ?? process.cwd());
+      const childEnv = { ...(env ?? process.env) };
+      // PWD is the shell working-directory variable, not a credential. Drop
+      // the parent's stale value so cwd-aware CLIs (e.g. opencode) use the
+      // spawn cwd instead of the parent's project.
+      delete childEnv.PWD;
       child = spawn(argv[0], argv.slice(1), {
-        cwd: cwd ?? process.cwd(),
-        env: env ?? process.env,
+        cwd: runCwd,
+        env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
       });
